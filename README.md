@@ -38,3 +38,7 @@ Spusťte `RealCaptureX.exe` ze složky se soubory sestavení. Stav implementace 
 ## Debug ověření
 
 Spuštění Debug EXE s `--self-check` prověří ořez, skládání, transpozici a virtuální klávesy. Hodnota `REAL_CAPTURE_X_INSPECT=1` zpřístupní plovoucí okna nástrojům QA a použije dočasný profil `%TEMP%\REAL Capture X QA`.
+
+## Přispěvatelé
+
+Na vývoji první verze se podílel [OpenAI Codex](https://github.com/codex).
