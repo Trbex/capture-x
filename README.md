@@ -4,7 +4,9 @@ Nativní nástroj pro snímání Windows 11 x64. Rozhraní používá WinUI 3. S
 
 ## Spuštění
 
-Přenosnou aplikaci spusťte souborem `artifacts/RealCaptureX/RealCaptureX.exe`. Soubory ve složce sestavení ponechte pohromadě. Pro sestavení ze zdrojového kódu je potřeba .NET 10 SDK.
+Přenosný ZIP rozbalte celý do jedné složky a spusťte `RealCaptureX.exe`. Ve stejném adresáři musí zůstat `RealCaptureX.pri` a knihovny přibalené v ZIPu. V pracovním adresáři je rozbalené sestavení v `artifacts/RealCaptureX`.
+
+Pro sestavení ze zdrojového kódu je potřeba .NET 10 SDK.
 
 ```powershell
 dotnet run --project RealCaptureX.csproj
