@@ -14,6 +14,8 @@ internal sealed class ShellIntegration : IDisposable
     private static readonly uint ActivateMessage = RegisterWindowMessage("RealCaptureX.Activate");
     private readonly nint hwnd;
     private readonly Action<CaptureCommand> execute;
+    private readonly Action<NativeWindow.Rect> showMenu;
+    private bool modernNotifications;
     private readonly Subclass callback;
     private readonly uint taskbarCreated;
     private readonly nint icon;
@@ -40,6 +42,15 @@ internal sealed class ShellIntegration : IDisposable
         public nint BalloonIcon;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NotifyIconIdentifier
+    {
+        public uint Size;
+        public nint Window;
+        public uint Id;
+        public Guid GuidItem;
+    }
+
     private delegate nint Subclass(nint hwnd, uint message, nuint wParam, nint lParam, nuint id, nuint data);
 
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint hwnd, Subclass proc, nuint id, nuint data);
@@ -52,16 +63,15 @@ internal sealed class ShellIntegration : IDisposable
     [DllImport("user32.dll")] private static extern bool DestroyIcon(nint icon);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern nint ExtractIcon(nint instance, string file, uint index);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIcon(uint message, ref NotifyIconData data);
-    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool AppendMenu(nint menu, uint flags, nuint id, string? content);
-    [DllImport("user32.dll")] private static extern uint TrackPopupMenu(nint menu, uint flags, int x, int y, int reserved, nint hwnd, nint rect);
-    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("shell32.dll")] private static extern int Shell_NotifyIconGetRect(
+        in NotifyIconIdentifier identifier, out NativeWindow.Rect iconLocation);
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nuint wParam, nint lParam);
 
-    public ShellIntegration(nint hwnd, Action<CaptureCommand> execute, string[] bindings)
+    public ShellIntegration(nint hwnd, Action<CaptureCommand> execute, Action<NativeWindow.Rect> showMenu, string[] bindings)
     {
         this.hwnd = hwnd;
         this.execute = execute;
+        this.showMenu = showMenu;
         this.bindings = bindings;
         callback = OnMessage;
         taskbarCreated = RegisterWindowMessage("TaskbarCreated");
@@ -112,9 +122,15 @@ internal sealed class ShellIntegration : IDisposable
         var data = new NotifyIconData
         {
             Size = (uint)Marshal.SizeOf<NotifyIconData>(), Window = hwnd, Id = 1,
-            Flags = 7, Callback = TrayMessage, Icon = icon, Tip = "REAL Capture X", Info = "", InfoTitle = ""
+            Flags = 7 | 0x80, Callback = TrayMessage, Icon = icon, Tip = "REAL Capture X", Info = "", InfoTitle = ""
         };
-        return Shell_NotifyIcon(command, ref data);
+        var successful = Shell_NotifyIcon(command, ref data);
+        if (command == 0)
+        {
+            data.Version = 4;
+            modernNotifications = successful && Shell_NotifyIcon(4, ref data);
+        }
+        return successful;
     }
 
     private nint OnMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
@@ -131,51 +147,30 @@ internal sealed class ShellIntegration : IDisposable
         }
         if (message == TrayMessage)
         {
-            if (lParam == 0x0202) execute(CaptureCommand.Toolbar);
-            if (lParam is 0x0205 or 0x007B) ShowMenu();
+            var notification = (int)(lParam & 0xFFFF);
+            if (modernNotifications ? notification is 0x0400 or 0x0401 : notification == 0x0202)
+                execute(CaptureCommand.Toolbar);
+            if (notification == 0x007B || (!modernNotifications && notification == 0x0205))
+                showMenu(TrayAnchor());
             return 0;
         }
         if (message == taskbarCreated) TrayAvailable = UpdateTray(0);
+        if (message is 0x001A or 0x031A) Appearance.Refresh();
         return DefSubclassProc(window, message, wParam, lParam);
     }
 
     public static void ActivateExisting() => PostMessage(new nint(0xFFFF), ActivateMessage, 0, 0);
 
-    private void ShowMenu()
+    private NativeWindow.Rect TrayAnchor()
     {
-        var menu = CreatePopupMenu();
-        if (menu == 0) return;
-        uint selected;
-        try
+        var identifier = new NotifyIconIdentifier
         {
-            Add(CaptureCommand.Region, $"Capture region\t{bindings[0]}");
-            Add(CaptureCommand.Window, $"Capture window\t{bindings[1]}");
-            Add(CaptureCommand.Display, $"Capture display\t{bindings[2]}");
-            Add(CaptureCommand.RepeatRegion, "Repeat last region");
-            Add(CaptureCommand.Text, "Capture text");
-            Add(CaptureCommand.Scroll, "Scrolling capture");
-            Add(CaptureCommand.ScrollHorizontal, "Horizontal scrolling capture");
-            Add(CaptureCommand.RecordRegion, "Record region");
-            Add(CaptureCommand.RecordDisplay, "Record display");
-            AppendMenu(menu, 0x800, 0, null);
-            Add(CaptureCommand.Toolbar, $"Capture toolbar\t{bindings[3]}");
-            Add(CaptureCommand.Recent, $"Quick Access\t{bindings[4]}");
-            Add(CaptureCommand.History, "Capture history");
-            Add(CaptureCommand.OpenStudio, "Open video in Studio");
-            Add(CaptureCommand.Settings, "Settings");
-            AppendMenu(menu, 0x800, 0, null);
-            Add(CaptureCommand.Exit, "Quit REAL Capture X");
-            NativeWindow.GetCursorPos(out var cursor);
-            NativeWindow.SetForegroundWindow(hwnd);
-            selected = TrackPopupMenu(menu, 0x0102, cursor.X, cursor.Y, 0, hwnd, 0);
-            PostMessage(hwnd, 0, 0, 0);
-        }
-        finally
-        {
-            DestroyMenu(menu);
-        }
-        if (selected != 0) execute((CaptureCommand)selected);
-        void Add(CaptureCommand command, string name) => AppendMenu(menu, 0, (nuint)command, name);
+            Size = (uint)Marshal.SizeOf<NotifyIconIdentifier>(), Window = hwnd, Id = 1
+        };
+        if (Shell_NotifyIconGetRect(identifier, out var rect) == 0 && rect.Width > 0) return rect;
+
+        NativeWindow.GetCursorPos(out var point);
+        return new NativeWindow.Rect { Left = point.X, Right = point.X + 1, Top = point.Y, Bottom = point.Y + 1 };
     }
 
     public void Dispose()

@@ -10,7 +10,7 @@ internal sealed record CaptureEntry(string Path, DateTimeOffset Created, string 
 }
 
 internal sealed record CaptureSettings(int Corner = 0, int Timeout = 12, bool ShowPreview = true, bool AutoCopy = false,
-    bool IncludePointer = false, string[]? Shortcuts = null)
+    bool IncludePointer = false, string[]? Shortcuts = null, ProductTheme Theme = ProductTheme.System)
 {
     internal string[] KeyBindings => Shortcuts ?? CaptureShortcut.Defaults();
 }
@@ -85,7 +85,12 @@ internal sealed class CaptureStore
             var value = JsonSerializer.Deserialize<CaptureSettings>(File.ReadAllText(preferences)) ?? new();
             try { CaptureShortcut.ParseAll(value.KeyBindings); }
             catch (InvalidOperationException) { value = value with { Shortcuts = null }; }
-            return value with { Corner = Math.Clamp(value.Corner, 0, 3), Timeout = Math.Clamp(value.Timeout, 0, 600) };
+            return value with
+            {
+                Corner = Math.Clamp(value.Corner, 0, 3),
+                Timeout = Math.Clamp(value.Timeout, 0, 600),
+                Theme = Enum.IsDefined(value.Theme) ? value.Theme : ProductTheme.System
+            };
         }
         catch (JsonException)
         {

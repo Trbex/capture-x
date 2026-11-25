@@ -20,10 +20,11 @@ dotnet run --project RealCaptureX.csproj
 | Shift při tažení | Čtvercový výběr |
 | Esc | Zrušení výběru |
 
-- Quick Access nabízí anotaci, schránku, export PNG, přetažení souboru, připnutí a rozpoznání textu.
-- Nabídka `…` v panelu snímání nabízí opakování posledního výřezu, OCR, svislé a vodorovné rolování a záznam oblasti nebo displeje.
-- Záznam ukládá MP4 v H.264. Systémový zvuk, mikrofon, kamera a chytrý zoom se zapínají před nahráváním. Studio umí přehrávání, nastavení začátku a konce, hlasitost a export.
-- Ikona v oznamovací oblasti otevírá panel nebo kontextovou nabídku. Klávesy, pozici náhledu, časovač a chování schránky lze upravit v nastavení.
+- Lišta má přímé akce pro oblast, okno, displej, posouvání, OCR a nahrávání. Nabídka `…` doplňuje opakování výřezu, vodorovné posouvání, Quick Access a otevření videa ve Studiu.
+- Pravé tlačítko na ikoně v oznamovací oblasti nebo na liště otevírá plovoucí nabídku příkazů. Mezi příkazy se pohybujte šipkami, nabídku zavřete klávesou Esc.
+- Quick Access nabízí anotaci, schránku, export PNG, přetažení souboru, připnutí a rozpoznání textu. Editor sdružuje vlastnosti tahu a pozadí v pravém panelu. Historie ukazuje snímky i náhledy nahrávek.
+- Záznam ukládá MP4 v H.264. Systémový zvuk, mikrofon, webkamera a chytrý zoom se zapínají před nahráváním. Studio umožňuje vymezit úsek střihu, upravit hlasitost a exportovat.
+- V **Settings → Appearance** lze zvolit systémový, světlý nebo tmavý motiv. Další kategorie obsahují pozici a časovač náhledu, volby schránky a klávesové zkratky.
 
 Lokální historie snímků, nahrávky a nastavení jsou v `%LOCALAPPDATA%\REAL Capture X`. OCR s angličtinou a češtinou běží místně přes Tesseract. Závislosti mají přehled v [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
@@ -41,4 +42,4 @@ Spuštění Debug EXE s `--self-check` prověří ořez, skládání, transpozic
 
 ## Přispěvatelé
 
-Na vývoji první verze se podílel [OpenAI Codex](https://github.com/codex).
+Na vývoji první verze a redesignu 0.2.0 se podílel [OpenAI Codex](https://github.com/codex).

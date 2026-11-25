@@ -1,4 +1,7 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using System.Diagnostics;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Graphics;
 
@@ -9,14 +12,18 @@ internal sealed class RecordingWindow : Window
     private readonly TaskCompletionSource<string?> result = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource stop = new();
     private readonly TextBlock status = Appearance.Label("", 12, Appearance.Muted);
-    private readonly StackPanel options = new() { Spacing = 5 };
+    private readonly Grid options = new() { ColumnSpacing = 8 };
+    private readonly Border optionsCard;
+    private readonly DispatcherQueueTimer timer;
+    private readonly Stopwatch elapsed = new();
+    private readonly TextBlock heading = Appearance.Label("Record screen", 14, strong: true);
     private readonly CheckBox cursor = new() { Content = "Show pointer", IsChecked = true };
     private readonly CheckBox system = new() { Content = "System audio" };
     private readonly CheckBox microphone = new() { Content = "Microphone" };
     private readonly CheckBox camera = new() { Content = "Webcam inset" };
     private readonly CheckBox smartZoom = new() { Content = "Smart zoom on clicks" };
-    private readonly Button start = new() { Content = "Start recording" };
-    private readonly Button end = new() { Content = "Stop", IsEnabled = false };
+    private readonly Button start = Appearance.Action("Start recording", icon: Glyph.Video, tone: ButtonTone.Primary);
+    private readonly Button end = Appearance.Action("Stop recording", icon: Glyph.Stop, tone: ButtonTone.Raised);
     private readonly nint monitor;
     private readonly RectInt32 area;
     private bool running;
@@ -28,31 +35,66 @@ internal sealed class RecordingWindow : Window
         this.area = area;
         Title = "REAL Capture X — Recording";
         NativeWindow.ToolWindow(this);
-        var root = new StackPanel
-        {
-            RequestedTheme = ElementTheme.Dark, Background = Appearance.Surface,
-            Padding = new Thickness(12, 8, 12, 8), Spacing = 6
-        };
-        root.Children.Add(Appearance.Label("Record screen", 14));
-        status.Text = $"{area.Width} × {area.Height} · MP4";
+        var root = new StackPanel { Padding = new Thickness(11), Spacing = 9 };
+        var header = new Grid { ColumnSpacing = 9 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition());
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(Appearance.Badge(Glyph.Video, 34));
+        var title = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        title.Children.Add(heading);
+        status.Text = $"{area.Width} × {area.Height} px   ·   MP4";
         status.TextTrimming = TextTrimming.CharacterEllipsis;
-        ToolTipService.SetToolTip(status, status.Text);
-        root.Children.Add(status);
-        options.Children.Add(cursor);
-        options.Children.Add(system);
-        options.Children.Add(microphone);
-        options.Children.Add(camera);
-        options.Children.Add(smartZoom);
-        root.Children.Add(options);
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        row.Children.Add(start);
-        row.Children.Add(end);
-        row.Children.Add(Appearance.IconButton("\uE711", "Close recording controls", () =>
+        title.Children.Add(status);
+        Grid.SetColumn(title, 1);
+        header.Children.Add(title);
+        var close = Appearance.IconButton(Glyph.Close, "Close recording controls", () =>
         {
             if (running) RequestStop(); else Close();
-        }));
-        root.Children.Add(row);
-        Content = root;
+        });
+        close.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(close, 2);
+        header.Children.Add(close);
+        root.Children.Add(header);
+
+        options.ColumnDefinitions.Add(new ColumnDefinition());
+        options.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var index = 0; index < 3; index++)
+            options.RowDefinitions.Add(new RowDefinition { Height = new GridLength(39) });
+        var choices = new[]
+        {
+            (cursor, Glyph.Cursor, "Show pointer"), (system, Glyph.Audio, "System audio"),
+            (microphone, Glyph.Mic, "Microphone"), (camera, Glyph.Video, "Webcam inset"),
+            (smartZoom, Glyph.Zoom, "Smart zoom on clicks")
+        };
+        for (var index = 0; index < choices.Length; index++)
+        {
+            var (option, icon, name) = choices[index];
+            option.Content = Appearance.ActionContent(name, icon, Appearance.Text);
+            option.MinWidth = 0;
+            option.HorizontalAlignment = HorizontalAlignment.Stretch;
+            AutomationProperties.SetName(option, name);
+            Grid.SetRow(option, index / 2);
+            Grid.SetColumn(option, index % 2);
+            if (index == choices.Length - 1) Grid.SetColumnSpan(option, 2);
+            options.Children.Add(option);
+        }
+        optionsCard = new Border
+        {
+            Background = Appearance.Panel, BorderBrush = Appearance.Line, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 4, 8, 4), Child = options
+        };
+        root.Children.Add(optionsCard);
+        start.HorizontalAlignment = HorizontalAlignment.Stretch;
+        root.Children.Add(start);
+        root.Children.Add(end);
+        end.HorizontalAlignment = HorizontalAlignment.Stretch;
+        end.Visibility = Visibility.Collapsed;
+        Appearance.SetContent(this, Appearance.Frame(root), floating: true);
+
+        timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(1);
+        timer.Tick += (_, _) => status.Text = $"MP4   ·   {elapsed.Elapsed:hh\\:mm\\:ss}";
         start.Click += async (_, _) => await StartAsync();
         end.Click += (_, _) => RequestStop();
         AppWindow.Closing += (_, e) =>
@@ -64,6 +106,7 @@ internal sealed class RecordingWindow : Window
         Closed += (_, _) =>
         {
             closed = true;
+            timer.Stop();
             result.TrySetResult(null);
             stop.Dispose();
         };
@@ -72,15 +115,17 @@ internal sealed class RecordingWindow : Window
     public Task<string?> ShowAsync()
     {
         Place(compact: false);
+        ProductMotion.Enter((FrameworkElement)Content);
         Activate();
         return result.Task;
     }
 
-    private void Place(bool compact) => NativeWindow.Place(this, monitor, 308, compact ? 112 : 290, 1, 0);
+    private void Place(bool compact) => NativeWindow.Place(this, monitor, compact ? 276 : 365, compact ? 103 : 238, 1, 0);
 
     private void RequestStop()
     {
         if (stop.IsCancellationRequested) return;
+        timer.Stop();
         end.IsEnabled = false;
         status.Text = "Finishing MP4…";
         stop.Cancel();
@@ -104,10 +149,14 @@ internal sealed class RecordingWindow : Window
             using var audio = system.IsChecked == true || microphone.IsChecked == true
                 ? new RecordingAudio(system.IsChecked == true, microphone.IsChecked == true) : null;
             if (stop.IsCancellationRequested) return;
-            options.Visibility = Visibility.Collapsed;
+            optionsCard.Visibility = Visibility.Collapsed;
             start.Visibility = Visibility.Collapsed;
+            end.Visibility = Visibility.Visible;
             end.IsEnabled = true;
-            status.Text = "Recording · Stop to open Studio";
+            heading.Text = "Recording";
+            status.Text = "MP4   ·   00:00:00";
+            elapsed.Restart();
+            timer.Start();
             Place(compact: true);
 #if DEBUG
             if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") != "1")
@@ -128,6 +177,7 @@ internal sealed class RecordingWindow : Window
         }
         finally
         {
+            timer.Stop();
             if (pending is not null) File.Delete(pending);
             running = false;
             if (stop.IsCancellationRequested || result.Task.IsCompleted)
@@ -137,10 +187,12 @@ internal sealed class RecordingWindow : Window
             else
             {
                 foreach (var option in options.Children.OfType<CheckBox>()) option.IsEnabled = true;
-                options.Visibility = Visibility.Visible;
+                optionsCard.Visibility = Visibility.Visible;
                 start.Visibility = Visibility.Visible;
                 start.IsEnabled = true;
+                end.Visibility = Visibility.Collapsed;
                 end.IsEnabled = false;
+                heading.Text = "Record screen";
                 Place(compact: false);
             }
         }

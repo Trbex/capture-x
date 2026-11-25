@@ -20,22 +20,24 @@ internal sealed class ScrollWindow : Window
         status = Appearance.Label(direction, 12, Appearance.Muted);
         Title = "REAL Capture X — Scrolling Capture";
         NativeWindow.ToolWindow(this);
-        var panel = new StackPanel
+        var panel = new StackPanel { Padding = new Thickness(11), Spacing = 10 };
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9 };
+        header.Children.Add(Appearance.Badge(horizontal ? Glyph.HorizontalScroll : Glyph.Scroll, 34));
+        var title = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        title.Children.Add(Appearance.Label("Scrolling capture", 14, strong: true));
+        title.Children.Add(status);
+        header.Children.Add(title);
+        panel.Children.Add(header);
+        panel.Children.Add(Appearance.Rule());
+        var buttons = new StackPanel
         {
-            RequestedTheme = ElementTheme.Dark, Background = Appearance.Surface,
-            Padding = new Thickness(12, 8, 12, 8), Spacing = 5
+            Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right
         };
-        panel.Children.Add(Appearance.Label("Scrolling capture", 14));
-        panel.Children.Add(status);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
-        var finish = new Button { Content = "Finish" };
-        finish.Click += (_, _) => { commit = true; done.Cancel(); };
-        var cancel = new Button { Content = "Cancel" };
-        cancel.Click += (_, _) => Close();
+        buttons.Children.Add(Appearance.Action("Cancel", Close));
+        var finish = Appearance.Action("Finish", () => { commit = true; done.Cancel(); }, Glyph.Check, ButtonTone.Primary);
         buttons.Children.Add(finish);
-        buttons.Children.Add(cancel);
         panel.Children.Add(buttons);
-        Content = panel;
+        Appearance.SetContent(this, Appearance.Frame(panel), floating: true);
         Closed += (_, _) => { closed = true; done.Cancel(); };
     }
 
@@ -48,11 +50,12 @@ internal sealed class ScrollWindow : Window
         }
         var display = NativeWindow.GetMonitor(monitor).Bounds;
         var anchorX = area.X + area.Width / 2 < display.Width / 2 ? 1 : 0;
-        NativeWindow.Place(this, monitor, 280, 112, anchorX, 0);
+        NativeWindow.Place(this, monitor, 324, 115, anchorX, 0);
 #if DEBUG
         if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") != "1")
 #endif
             NativeWindow.ExcludeFromCapture(this);
+        ProductMotion.Enter((FrameworkElement)Content);
         AppWindow.Show(false);
         var cancellation = done.Token;
         var dispatcher = DispatcherQueue;

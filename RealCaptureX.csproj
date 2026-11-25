@@ -8,7 +8,7 @@
     <RootNamespace>RealCaptureX</RootNamespace>
     <AssemblyName>RealCaptureX</AssemblyName>
     <Product>REAL Capture X</Product>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -28,4 +28,8 @@
     <None Update="Assets\Licenses\*" CopyToPublishDirectory="PreserveNewest" />
     <None Update="THIRD-PARTY-NOTICES.md" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <Target Name="CopyWinUIResourceIndex" AfterTargets="Publish" Condition="'$(WindowsPackageType)' == 'None'">
+    <!-- The unpackaged publish pipeline omits the PRI used to locate embedded WinUI markup. -->
+    <Copy SourceFiles="$(TargetDir)$(AssemblyName).pri" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

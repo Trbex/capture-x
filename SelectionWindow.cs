@@ -21,9 +21,18 @@ internal sealed class SelectionWindow : Window
     private readonly CaptureFrame frame;
     private readonly NativeWindow.Rect display;
     private readonly IReadOnlyList<Target>? windows;
-    private readonly Canvas canvas;
+    private readonly Grid surface;
+    private readonly Canvas canvas = new() { IsHitTestVisible = false };
     private readonly Rectangle[] shade = new Rectangle[4];
-    private readonly Rectangle outline = new() { Stroke = Appearance.Accent, StrokeThickness = 2, IsHitTestVisible = false };
+    private readonly Rectangle edgeShadow = new() { Stroke = Appearance.Brush(0, 0, 0, 166), StrokeThickness = 3, IsHitTestVisible = false };
+    private readonly Rectangle outline = new() { Stroke = Appearance.Accent, StrokeThickness = 1.5, IsHitTestVisible = false };
+    private readonly Rectangle horizontalGuide = Guide();
+    private readonly Rectangle verticalGuide = Guide();
+    private readonly Rectangle[] corners = Enumerable.Range(0, 8)
+        .Select(_ => new Rectangle { Fill = Appearance.Accent, IsHitTestVisible = false }).ToArray();
+
+    private static Rectangle Guide() =>
+        new() { Fill = Appearance.Brush(249, 246, 235, 70), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     private readonly Border badge;
     private readonly TextBlock dimensions = Appearance.Label("", 13);
     private readonly Image image = new() { Stretch = Microsoft.UI.Xaml.Media.Stretch.Fill, IsHitTestVisible = false };
@@ -36,38 +45,52 @@ internal sealed class SelectionWindow : Window
         this.frame = frame;
         this.display = display;
         this.windows = windows;
-        canvas = new SelectionCanvas(windows is null)
+        surface = new SelectionSurface(windows is null)
         {
-            IsTabStop = true, Background = Appearance.Brush(0, 0, 0, 0)
+            IsTabStop = true, Background = Appearance.Canvas
         };
         Title = windows is null ? "REAL Capture X — Select region" : "REAL Capture X — Select window";
         ToolWindow(this, rounded: false);
 
-        var root = new Grid { Background = Appearance.Surface, RequestedTheme = ElementTheme.Dark };
-        root.Children.Add(image);
-        root.Children.Add(canvas);
+        surface.Children.Add(image);
+        surface.Children.Add(canvas);
         for (var i = 0; i < shade.Length; i++)
         {
-            shade[i] = new Rectangle { Fill = Appearance.Brush(12, 14, 18, 139), IsHitTestVisible = false };
+            shade[i] = new Rectangle { Fill = Appearance.Brush(13, 12, 15, 151), IsHitTestVisible = false };
             canvas.Children.Add(shade[i]);
         }
+        canvas.Children.Add(horizontalGuide);
+        canvas.Children.Add(verticalGuide);
+        canvas.Children.Add(edgeShadow);
         canvas.Children.Add(outline);
+        foreach (var corner in corners) canvas.Children.Add(corner);
         badge = MakeBadge(dimensions);
+        badge.Visibility = Visibility.Collapsed;
+        badge.Padding = new Thickness(8, 4, 8, 4);
         canvas.Children.Add(badge);
-        var instruction = MakeBadge(Appearance.Label(windows is null
-            ? "Drag to select  ·  Shift for square  ·  Esc to cancel"
-            : "Select a window  ·  Esc to cancel", 14));
+        var hints = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        hints.Children.Add(Symbols.Draw(windows is null ? Glyph.Region : Glyph.Window, 17, Appearance.AccentText));
+        hints.Children.Add(Appearance.Label(windows is null ? "Drag to capture a region" : "Click a window to capture", 12, strong: true));
+        hints.Children.Add(Appearance.Divider());
+        if (windows is null)
+        {
+            hints.Children.Add(Appearance.Key("Shift"));
+            hints.Children.Add(Appearance.Label("Square", 11, Appearance.Muted));
+        }
+        hints.Children.Add(Appearance.Key("Esc"));
+        var instruction = MakeBadge(hints);
         instruction.HorizontalAlignment = HorizontalAlignment.Center;
         instruction.VerticalAlignment = VerticalAlignment.Top;
         instruction.Margin = new Thickness(0, 23, 0, 0);
         instruction.IsHitTestVisible = false;
-        root.Children.Add(instruction);
-        Content = root;
+        instruction.Loaded += (_, _) => ProductMotion.Enter(instruction);
+        surface.Children.Add(instruction);
+        Appearance.SetContent(this, surface);
 
-        canvas.PointerMoved += OnPointerMoved;
-        canvas.PointerPressed += OnPointerPressed;
-        canvas.PointerReleased += OnPointerReleased;
-        canvas.PointerCaptureLost += (_, _) =>
+        surface.PointerMoved += OnPointerMoved;
+        surface.PointerPressed += OnPointerPressed;
+        surface.PointerReleased += OnPointerReleased;
+        surface.PointerCaptureLost += (_, _) =>
         {
             if (start is null) return;
             start = null;
@@ -75,8 +98,8 @@ internal sealed class SelectionWindow : Window
             UpdateMask(default);
         };
         canvas.SizeChanged += (_, _) => UpdateMask(area);
-        canvas.Loaded += (_, _) => canvas.Focus(FocusState.Programmatic);
-        canvas.KeyDown += (_, e) =>
+        surface.Loaded += (_, _) => surface.Focus(FocusState.Programmatic);
+        surface.KeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.Escape)
             {
@@ -87,11 +110,11 @@ internal sealed class SelectionWindow : Window
         Closed += (_, _) => result.TrySetResult(null);
     }
 
-    private static Border MakeBadge(TextBlock text) => new()
+    private static Border MakeBadge(FrameworkElement content) => new()
     {
-        Child = text, CornerRadius = new CornerRadius(8), Padding = new Thickness(11, 6, 11, 6),
+        Child = content, CornerRadius = new CornerRadius(11), Padding = new Thickness(10, 7, 10, 7),
         Background = Appearance.Surface, BorderBrush = Appearance.Line, BorderThickness = new Thickness(1),
-        IsHitTestVisible = false, MaxWidth = 500
+        IsHitTestVisible = false, MaxWidth = 400
     };
 
     public Task<Selection?> PickAsync()
@@ -107,7 +130,7 @@ internal sealed class SelectionWindow : Window
         Activate();
         SetWindowPos(hwnd, Topmost, 0, 0, 0, 0, NoActivate | 0x0003);
         SetForegroundWindow(hwnd);
-        canvas.Focus(FocusState.Programmatic);
+        surface.Focus(FocusState.Programmatic);
         return result.Task;
     }
 
@@ -119,9 +142,16 @@ internal sealed class SelectionWindow : Window
             UpdateWindow();
             return;
         }
-        if (start is not { } origin) return;
+        if (start is not { } origin)
+        {
+            horizontalGuide.Visibility = verticalGuide.Visibility = Visibility.Visible;
+            Place(horizontalGuide, 0, position.Y, canvas.ActualWidth, 1);
+            Place(verticalGuide, position.X, 0, 1, canvas.ActualHeight);
+            return;
+        }
+        horizontalGuide.Visibility = verticalGuide.Visibility = Visibility.Collapsed;
         var a = origin;
-        var b = ToPixel(position, e.Pointer.PointerDeviceType);
+        var b = ToPixel(position);
         if (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
         {
@@ -149,8 +179,9 @@ internal sealed class SelectionWindow : Window
             }
             return;
         }
-        canvas.CapturePointer(e.Pointer);
-        start = ToPixel(pointer.Position, e.Pointer.PointerDeviceType);
+        surface.CapturePointer(e.Pointer);
+        horizontalGuide.Visibility = verticalGuide.Visibility = Visibility.Collapsed;
+        start = ToPixel(pointer.Position);
         area = default;
         UpdateMask(area);
     }
@@ -160,7 +191,7 @@ internal sealed class SelectionWindow : Window
         if (start is null) return;
         OnPointerMoved(sender, e);
         start = null;
-        canvas.ReleasePointerCapture(e.Pointer);
+        surface.ReleasePointerCapture(e.Pointer);
         if (area.Width >= 2 && area.Height >= 2)
             Finish(new Selection(area, 0));
     }
@@ -182,20 +213,11 @@ internal sealed class SelectionWindow : Window
         UpdateMask(area);
     }
 
-    private NativeWindow.Point ToPixel(Point point, PointerDeviceType type)
+    private NativeWindow.Point ToPixel(Point point) => new()
     {
-        if (type == PointerDeviceType.Mouse && GetCursorPos(out var cursor))
-            return new NativeWindow.Point
-            {
-                X = Math.Clamp((int)Math.Round((cursor.X - display.Left) * (double)frame.Width / display.Width), 0, frame.Width),
-                Y = Math.Clamp((int)Math.Round((cursor.Y - display.Top) * (double)frame.Height / display.Height), 0, frame.Height)
-            };
-        return new NativeWindow.Point
-        {
-            X = Math.Clamp((int)Math.Round(point.X * frame.Width / Math.Max(1, canvas.ActualWidth)), 0, frame.Width),
-            Y = Math.Clamp((int)Math.Round(point.Y * frame.Height / Math.Max(1, canvas.ActualHeight)), 0, frame.Height)
-        };
-    }
+        X = Math.Clamp((int)Math.Round(point.X * frame.Width / Math.Max(1, surface.ActualWidth)), 0, frame.Width),
+        Y = Math.Clamp((int)Math.Round(point.Y * frame.Height / Math.Max(1, surface.ActualHeight)), 0, frame.Height)
+    };
 
     private void UpdateMask(RectInt32 rect)
     {
@@ -209,8 +231,22 @@ internal sealed class SelectionWindow : Window
         Place(shade[1], 0, y, x, height);
         Place(shade[2], x + width, y, w - x - width, height);
         Place(shade[3], 0, y + height, w, h - y - height);
+        var visible = width > 0 && height > 0;
+        Place(edgeShadow, x, y, width, height);
         Place(outline, x, y, width, height);
-        badge.Visibility = width > 0 && height > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var tick = Math.Min(8, Math.Min(width, height) / 2);
+        for (var index = 0; index < 4; index++)
+        {
+            var cx = x + (index % 2 == 0 ? 0 : width - 2);
+            var cy = y + (index < 2 ? 0 : height - 2);
+            var visibility = tick >= 3 ? Visibility.Visible : Visibility.Collapsed;
+            corners[index * 2].Visibility = corners[index * 2 + 1].Visibility = visibility;
+            Place(corners[index * 2], cx + (index % 2 == 0 ? 0 : 2 - tick), cy, tick, 2);
+            Place(corners[index * 2 + 1], cx, cy + (index < 2 ? 0 : 2 - tick), 2, tick);
+        }
+
+        if (visible && badge.Visibility != Visibility.Visible) ProductMotion.Reveal(badge);
+        badge.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         dimensions.Text = hovered?.Title ?? $"{rect.Width} × {rect.Height}";
         dimensions.TextTrimming = TextTrimming.CharacterEllipsis;
         Canvas.SetLeft(badge, Math.Clamp(x + 2, 4, Math.Max(4, w - 190)));
@@ -232,9 +268,9 @@ internal sealed class SelectionWindow : Window
         Close();
     }
 
-    private sealed class SelectionCanvas : Canvas
+    private sealed class SelectionSurface : Grid
     {
-        public SelectionCanvas(bool crosshair)
+        public SelectionSurface(bool crosshair)
         {
             if (crosshair) ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
         }

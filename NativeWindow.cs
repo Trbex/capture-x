@@ -36,6 +36,23 @@ internal static class NativeWindow
         public uint Flags;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HighContrast
+    {
+        public uint Size, Flags;
+        public nint Scheme;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+    private static extern bool SystemParametersInfo(uint action, uint size, ref HighContrast data, uint options);
+
+    internal static bool IsHighContrast()
+    {
+        var size = (uint)Marshal.SizeOf<HighContrast>();
+        var status = new HighContrast { Size = size };
+        return SystemParametersInfo(0x0042, size, ref status, 0) && (status.Flags & 1) != 0;
+    }
+
     [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] internal static extern nint MonitorFromPoint(Point point, uint flags);
@@ -110,7 +127,15 @@ internal static class NativeWindow
         if (!showInSwitchers)
             SetWindowLongPtr(hwnd, extendedStyle, (nint)((style | 0x80) & ~0x40000L));
         DwmSetWindowAttribute(hwnd, 33, rounded ? 2 : 1, sizeof(int));
-        DwmSetWindowAttribute(hwnd, 34, unchecked((int)0xFFFFFFFE), sizeof(int));
+    }
+
+    internal static void StyleFloat(Window window, Windows.UI.Color border, bool dark)
+    {
+        const int useImmersiveDarkMode = 20;
+        const int borderColor = 34;
+        var hwnd = Handle(window);
+        DwmSetWindowAttribute(hwnd, useImmersiveDarkMode, dark ? 1 : 0, sizeof(int));
+        DwmSetWindowAttribute(hwnd, borderColor, border.R | (border.G << 8) | (border.B << 16), sizeof(int));
     }
 
     internal static void Place(Window window, nint monitor, int width, int height, double anchorX, double anchorY)
@@ -125,6 +150,25 @@ internal static class NativeWindow
         var padding = (int)Math.Round(16 * scale);
         var x = work.Left + Math.Max(0, (int)Math.Round((work.Width - w - padding * 2) * anchorX) + padding);
         var y = work.Top + Math.Max(0, (int)Math.Round((work.Height - h - padding * 2) * anchorY) + padding);
+        window.AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
+    }
+
+    internal static void PlacePopup(Window window, Rect anchor, int width, int height)
+    {
+        var center = new Point { X = anchor.Left + anchor.Width / 2, Y = anchor.Top + anchor.Height / 2 };
+        var monitor = MonitorFromPoint(center, 2);
+        var work = GetMonitor(monitor).Work;
+        var hwnd = Handle(window);
+        if (MonitorFromWindow(hwnd, 2) != monitor)
+            SetWindowPos(hwnd, 0, center.X, center.Y, 1, 1, NoActivate | 0x0004);
+        var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96.0;
+        var gap = (int)Math.Round(8 * scale);
+        var w = Math.Min((int)Math.Round(width * scale), work.Width - 2 * gap);
+        var h = Math.Min((int)Math.Round(height * scale), work.Height - 2 * gap);
+        var x = Math.Clamp(anchor.Right - w, work.Left + gap, work.Right - w - gap);
+        var above = anchor.Top - h - gap;
+        var below = anchor.Bottom + gap;
+        var y = Math.Clamp(above >= work.Top + gap ? above : below, work.Top + gap, work.Bottom - h - gap);
         window.AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
     }
 

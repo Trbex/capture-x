@@ -20,38 +20,38 @@ internal sealed class PinnedWindow : Window
         entry = capture;
         Title = "REAL Capture X — Pinned";
         NativeWindow.ToolWindow(this);
-        var layout = new Grid { Background = Appearance.Surface, RequestedTheme = ElementTheme.Dark };
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
         layout.RowDefinitions.Add(new RowDefinition());
-        var bar = new Grid { ColumnSpacing = 6, Padding = new Thickness(8, 3, 5, 3) };
+        var bar = new Grid { ColumnSpacing = 3, Padding = new Thickness(8, 2, 4, 2) };
         bar.ColumnDefinitions.Add(new ColumnDefinition());
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var grip = new Border
-        {
-            Background = Appearance.Brush(0, 0, 0, 0),
-            Child = Appearance.Label("Pinned", 11, Appearance.Muted),
-            Padding = new Thickness(3, 0, 3, 0)
-        };
+        var caption = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+        caption.Children.Add(Symbols.Draw(Glyph.Grip, 16, Appearance.Muted));
+        caption.Children.Add(Appearance.Label("Pinned", 11, Appearance.Muted, strong: true));
+        var grip = new Border { Background = Appearance.Clear, Child = caption };
         bar.Children.Add(grip);
-        var sizes = new MenuFlyout();
-        foreach (var size in new[] { 240, 360, 540, 720 })
-        {
-            var item = new MenuFlyoutItem { Text = $"Fit to {size} px" };
-            item.Click += (_, _) => Resize(size, center: false);
-            sizes.Items.Add(item);
-        }
-        var sizeButton = Appearance.IconButton("\uE740", "Resize pinned image");
-        sizeButton.Flyout = sizes;
+
+        var sizeButton = Appearance.IconButton(Glyph.Scale, "Resize pinned image", size: 29);
+        sizeButton.Flyout = CaptureMenu.Flyout(new MenuSection("Image size",
+            new[] { 240, 360, 540, 720 }.Select(size =>
+                new MenuAction($"Fit to {size} px", Glyph.Scale, () => Resize(size, center: false))).ToArray()));
         Grid.SetColumn(sizeButton, 1);
         bar.Children.Add(sizeButton);
-        var close = Appearance.IconButton("\uE711", "Unpin screenshot", Close);
+        var close = Appearance.IconButton(Glyph.Close, "Unpin screenshot", Close, 29);
         Grid.SetColumn(close, 2);
         bar.Children.Add(close);
         layout.Children.Add(bar);
-        Grid.SetRow(preview, 1);
-        layout.Children.Add(preview);
-        Content = layout;
+
+        var stage = new Border
+        {
+            Background = Appearance.Canvas, CornerRadius = new CornerRadius(8),
+            Margin = new Thickness(4, 0, 4, 4), Child = preview
+        };
+        Grid.SetRow(stage, 1);
+        layout.Children.Add(stage);
+        Appearance.SetContent(this, Appearance.Frame(layout), floating: true);
 
         grip.PointerPressed += (_, e) =>
         {
@@ -94,14 +94,15 @@ internal sealed class PinnedWindow : Window
         if (closed) return;
         preview.Source = source;
         Resize(360, center: true);
+        ProductMotion.Enter((FrameworkElement)Content);
         AppWindow.Show(false);
     }
 
     private void Resize(int size, bool center)
     {
         var ratio = Math.Min(1, size / (double)Math.Max(entry.Width, entry.Height));
-        var width = Math.Max(110, (int)Math.Round(entry.Width * ratio));
-        var height = 37 + (int)Math.Round(entry.Height * ratio);
+        var width = Math.Max(148, 10 + (int)Math.Round(entry.Width * ratio));
+        var height = 42 + (int)Math.Round(entry.Height * ratio);
         var monitor = NativeWindow.CursorMonitor();
         if (center)
             NativeWindow.Place(this, monitor, width, height, 0.75, 0.27);
