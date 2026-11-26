@@ -189,12 +189,14 @@ internal sealed class HistoryWindow : Window
     private static ListViewItem Item(object value, string name, string subtitle, Glyph icon)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(2, 4, 0, 4) };
-        row.Children.Add(new Border
+        var thumb = new Border
         {
-            Width = 32, Height = 32, Background = Appearance.Canvas, CornerRadius = new CornerRadius(7),
-            Child = Symbols.Draw(icon, 17, Appearance.Muted)
-        });
-        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, MaxWidth = 162 };
+            Width = 46, Height = 32, Background = Appearance.Canvas, CornerRadius = new CornerRadius(6),
+            BorderBrush = Appearance.Line, BorderThickness = new Thickness(1), Child = Symbols.Draw(icon, 16, Appearance.Muted)
+        };
+        if (value is CaptureEntry capture) _ = LoadThumbnailAsync(thumb, capture.Path);
+        row.Children.Add(thumb);
+        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2, MaxWidth = 150 };
         var title = Appearance.Label(name, 12, strong: true);
         title.TextTrimming = TextTrimming.CharacterEllipsis;
         labels.Children.Add(title);
@@ -203,6 +205,21 @@ internal sealed class HistoryWindow : Window
         var item = new ListViewItem { Tag = value, Content = row, Padding = new Thickness(4, 0, 4, 0) };
         AutomationProperties.SetName(item, name + ", " + subtitle);
         return item;
+    }
+
+    /// <summary>Small decoded thumbnail (96 px wide) so the list stays light even with many captures.</summary>
+    private static async Task LoadThumbnailAsync(Border target, string path)
+    {
+        try
+        {
+            var source = new BitmapImage { DecodePixelWidth = 96 };
+            using var stream = await (await StorageFile.GetFileFromPathAsync(path)).OpenReadAsync();
+            await source.SetSourceAsync(stream);
+            target.Child = null;
+            target.Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill };
+            ProductMotion.Reveal(target);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException) { }
     }
 
     private async Task PreviewAsync()

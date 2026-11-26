@@ -7,7 +7,17 @@ public partial class App : Application
     private Mutex? instance;
     private CaptureController? controller;
 
-    public App() => InitializeComponent();
+    internal static string InstanceName { get; } =
+#if DEBUG
+        QaMode.Profile ? "RealCaptureX.Inspect" :
+#endif
+        "RealCaptureX";
+
+    public App()
+    {
+        InitializeComponent();
+        UnhandledException += (_, e) => Diagnostics.Log($"Unhandled: {e.Exception}");
+    }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -19,7 +29,7 @@ public partial class App : Application
             return;
         }
 #endif
-        instance = new Mutex(initiallyOwned: true, "Local\\RealCaptureX", out var ownsInstance);
+        instance = new Mutex(initiallyOwned: true, $"Local\\{InstanceName}", out var ownsInstance);
         if (!ownsInstance)
         {
             ShellIntegration.ActivateExisting();

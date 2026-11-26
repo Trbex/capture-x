@@ -11,7 +11,7 @@ internal enum CaptureCommand
 internal sealed class ShellIntegration : IDisposable
 {
     private const uint TrayMessage = 0x8001;
-    private static readonly uint ActivateMessage = RegisterWindowMessage("RealCaptureX.Activate");
+    private static readonly uint ActivateMessage = RegisterWindowMessage($"{App.InstanceName}.Activate");
     private readonly nint hwnd;
     private readonly Action<CaptureCommand> execute;
     private readonly Action<NativeWindow.Rect> showMenu;

@@ -8,10 +8,13 @@ using Windows.System;
 
 namespace RealCaptureX;
 
+/// <summary>A screenshot floating above other windows. Drag anywhere to move; controls appear on hover.</summary>
 internal sealed class PinnedWindow : Window
 {
     private readonly CaptureEntry entry;
-    private readonly Image preview = new() { Stretch = Stretch.Uniform };
+    private readonly ImageBrush image = new() { Stretch = Stretch.Uniform };
+    private readonly GlassSurface glass;
+    private readonly Grid controls;
     private (NativeWindow.Point Pointer, PointInt32 Window)? drag;
     private bool closed;
 
@@ -21,53 +24,49 @@ internal sealed class PinnedWindow : Window
         Title = "REAL Capture X — Pinned";
         NativeWindow.ToolWindow(this);
         var layout = new Grid();
-        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
-        layout.RowDefinitions.Add(new RowDefinition());
-        var bar = new Grid { ColumnSpacing = 3, Padding = new Thickness(8, 2, 4, 2) };
-        bar.ColumnDefinitions.Add(new ColumnDefinition());
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var caption = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        caption.Children.Add(Symbols.Draw(Glyph.Grip, 16, Appearance.Muted));
-        caption.Children.Add(Appearance.Label("Pinned", 11, Appearance.Muted, strong: true));
-        var grip = new Border { Background = Appearance.Clear, Child = caption };
-        bar.Children.Add(grip);
+        var picture = new Border { CornerRadius = new CornerRadius(10), Background = image };
+        layout.Children.Add(picture);
 
-        var sizeButton = Appearance.IconButton(Glyph.Scale, "Resize pinned image", size: 29);
-        sizeButton.Flyout = CaptureMenu.Flyout(new MenuSection("Image size",
-            new[] { 240, 360, 540, 720 }.Select(size =>
-                new MenuAction($"Fit to {size} px", Glyph.Scale, () => Resize(size, center: false))).ToArray()));
-        Grid.SetColumn(sizeButton, 1);
-        bar.Children.Add(sizeButton);
-        var close = Appearance.IconButton(Glyph.Close, "Unpin screenshot", Close, 29);
-        Grid.SetColumn(close, 2);
-        bar.Children.Add(close);
-        layout.Children.Add(bar);
-
-        var stage = new Border
+        controls = new Grid
         {
-            Background = Appearance.Canvas, CornerRadius = new CornerRadius(8),
-            Margin = new Thickness(4, 0, 4, 4), Child = preview
+            VerticalAlignment = VerticalAlignment.Top, Padding = new Thickness(6), ColumnSpacing = 4,
+            RequestedTheme = ElementTheme.Dark
         };
-        Grid.SetRow(stage, 1);
-        layout.Children.Add(stage);
-        Appearance.SetContent(this, Appearance.Frame(layout), floating: true);
+        controls.ColumnDefinitions.Add(new ColumnDefinition());
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var sizeButton = Overlay(Glyph.Scale, "Resize pinned image", null);
+        sizeButton.Click += (_, _) => TrayMenuWindow.Shared?.ShowMenu(NativeWindow.ScreenRect(this, sizeButton), null,
+            [new MenuSection("Image size", new[] { 240, 360, 540, 720 }.Select(size =>
+                new MenuAction($"Fit to {size} px", Glyph.Scale, () => Resize(size, center: false))).ToArray())], 220);
+        Grid.SetColumn(sizeButton, 1);
+        controls.Children.Add(sizeButton);
+        var close = Overlay(Glyph.Close, "Unpin screenshot", Close);
+        Grid.SetColumn(close, 2);
+        controls.Children.Add(close);
+        layout.Children.Add(controls);
+        ProductMotion.Hide(controls);
 
-        grip.PointerPressed += (_, e) =>
+        glass = Appearance.Float(this, layout, radius: 12);
+        glass.Panel.Padding = new Thickness(3);
+        glass.Panel.PointerEntered += (_, _) => ProductMotion.Opacity(controls, 1, ProductMotion.Hover);
+        glass.Panel.PointerExited += (_, _) => ProductMotion.Opacity(controls, 0, TimeSpan.FromMilliseconds(200));
+
+        picture.PointerPressed += (_, e) =>
         {
-            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed || !grip.CapturePointer(e.Pointer)) return;
+            if (!e.GetCurrentPoint(picture).Properties.IsLeftButtonPressed || !picture.CapturePointer(e.Pointer)) return;
             NativeWindow.GetCursorPos(out var cursor);
             drag = (cursor, AppWindow.Position);
         };
-        grip.PointerMoved += (_, _) =>
+        picture.PointerMoved += (_, _) =>
         {
             if (drag is not { } start) return;
             NativeWindow.GetCursorPos(out var cursor);
             AppWindow.Move(new PointInt32(start.Window.X + cursor.X - start.Pointer.X,
                 start.Window.Y + cursor.Y - start.Pointer.Y));
         };
-        grip.PointerReleased += (_, e) => { drag = null; grip.ReleasePointerCapture(e.Pointer); };
-        grip.PointerCaptureLost += (_, _) => drag = null;
+        picture.PointerReleased += (_, e) => { drag = null; picture.ReleasePointerCapture(e.Pointer); };
+        picture.PointerCaptureLost += (_, _) => drag = null;
         layout.KeyDown += (_, e) =>
         {
             var pos = AppWindow.Position;
@@ -84,6 +83,15 @@ internal sealed class PinnedWindow : Window
             e.Handled = true;
         };
         Closed += (_, _) => closed = true;
+
+        static Button Overlay(Glyph glyph, string name, Action? run)
+        {
+            var button = Appearance.IconButton(glyph, name, run, 28);
+            button.Background = Appearance.Brush(12, 12, 14, 170);
+            button.CornerRadius = new CornerRadius(14);
+            button.Content = Symbols.Draw(glyph, 14, Appearance.Brush(255, 255, 255));
+            return button;
+        }
     }
 
     public async Task ShowAsync()
@@ -92,24 +100,25 @@ internal sealed class PinnedWindow : Window
         using (var stream = await (await StorageFile.GetFileFromPathAsync(entry.Path)).OpenReadAsync())
             await source.SetSourceAsync(stream);
         if (closed) return;
-        preview.Source = source;
+        image.ImageSource = source;
         Resize(360, center: true);
-        ProductMotion.Enter((FrameworkElement)Content);
         AppWindow.Show(false);
+        glass.Enter();
     }
 
     private void Resize(int size, bool center)
     {
         var ratio = Math.Min(1, size / (double)Math.Max(entry.Width, entry.Height));
-        var width = Math.Max(148, 10 + (int)Math.Round(entry.Width * ratio));
-        var height = 42 + (int)Math.Round(entry.Height * ratio);
+        var width = GlassSurface.Outer(Math.Max(120, 6 + Math.Round(entry.Width * ratio)));
+        var height = GlassSurface.Outer(Math.Max(60, 6 + Math.Round(entry.Height * ratio)));
         var monitor = NativeWindow.CursorMonitor();
         if (center)
-            NativeWindow.Place(this, monitor, width, height, 0.75, 0.27);
+            NativeWindow.Place(this, monitor, width, height, 0.75, 0.27, GlassSurface.Margin);
         else
         {
             var scale = Math.Max(96, NativeWindow.GetDpiForWindow(NativeWindow.Handle(this))) / 96.0;
             AppWindow.Resize(new SizeInt32((int)Math.Round(width * scale), (int)Math.Round(height * scale)));
+            ProductMotion.Reveal(glass.Panel);
         }
     }
 }

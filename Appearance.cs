@@ -13,22 +13,48 @@ internal enum ButtonTone { Quiet, Raised, Primary, Selected, Danger }
 
 internal static class Appearance
 {
-    internal static readonly SolidColorBrush Surface = Brush(30, 30, 33);
-    internal static readonly SolidColorBrush Glass = Brush(30, 30, 33, 241);
-    internal static readonly SolidColorBrush Panel = Brush(38, 38, 42);
-    internal static readonly SolidColorBrush Canvas = Brush(21, 21, 24);
-    internal static readonly SolidColorBrush Text = Brush(247, 244, 241);
-    internal static readonly SolidColorBrush Muted = Brush(181, 176, 173);
-    internal static readonly SolidColorBrush Accent = Brush(250, 178, 117);
-    private static readonly SolidColorBrush AccentHover = Brush(255, 195, 141);
-    private static readonly SolidColorBrush AccentPress = Brush(228, 146, 86);
-    private static readonly SolidColorBrush SelectionLine = Brush(173, 120, 83);
-    internal static readonly SolidColorBrush OnAccent = Brush(46, 24, 11);
-    internal static readonly SolidColorBrush AccentText = Brush(255, 202, 158);
-    internal static readonly SolidColorBrush Tint = Brush(63, 43, 33);
-    internal static readonly SolidColorBrush Line = Brush(62, 59, 61);
-    internal static readonly SolidColorBrush Danger = Brush(251, 142, 135);
+    // Neutral graphite / paper palette. Colour lives in annotations, never in the chrome.
+    internal static readonly SolidColorBrush Surface = Brush(27, 28, 31);
+    internal static readonly SolidColorBrush Chrome = Brush(27, 28, 31, 235);
+    internal static readonly SolidColorBrush Panel = Brush(36, 37, 41);
+    internal static readonly SolidColorBrush Elevated = Brush(36, 37, 41, 245);
+    internal static readonly SolidColorBrush Canvas = Brush(17, 18, 20);
+    internal static readonly SolidColorBrush Text = Brush(245, 245, 247);
+    internal static readonly SolidColorBrush Muted = Brush(160, 162, 170);
+    internal static readonly SolidColorBrush Faint = Brush(110, 112, 120);
+    internal static readonly SolidColorBrush Accent = Brush(245, 245, 247);
+    private static readonly SolidColorBrush AccentHover = Brush(255, 255, 255);
+    private static readonly SolidColorBrush AccentPress = Brush(214, 215, 219);
+    private static readonly SolidColorBrush SelectionLine = Brush(255, 255, 255, 34);
+    internal static readonly SolidColorBrush OnAccent = Brush(18, 19, 21);
+    internal static readonly SolidColorBrush AccentText = Brush(255, 255, 255);
+    internal static readonly SolidColorBrush Tint = Brush(255, 255, 255, 22);
+    internal static readonly SolidColorBrush Line = Brush(255, 255, 255, 20);
+    internal static readonly SolidColorBrush Field = Brush(255, 255, 255, 12);
+    internal static readonly SolidColorBrush Danger = Brush(255, 120, 112);
     internal static readonly SolidColorBrush Clear = Brush(0, 0, 0, 0);
+    internal static readonly SolidColorBrush GlassTint = Brush(30, 31, 35, 208);
+    internal static readonly SolidColorBrush Hover = Brush(255, 255, 255, 16);
+    internal static readonly SolidColorBrush Pressed = Brush(255, 255, 255, 10);
+
+    private static readonly SolidColorBrush Rim = Brush(255, 255, 255, 30);
+    private static readonly GradientStop SelectionTop = new() { Offset = 0 };
+    private static readonly GradientStop SelectionBottom = new() { Offset = 1 };
+    private static readonly LinearGradientBrush Selection = new()
+    {
+        EndPoint = new Windows.Foundation.Point(0, 1),
+        GradientStops = { SelectionTop, SelectionBottom }
+    };
+    internal static Brush SelectedFill => Selection;
+    internal static Brush SelectedRim => SelectionLine;
+    private static readonly GradientStop RimTop = new() { Offset = 0 };
+    private static readonly GradientStop RimBottom = new() { Offset = 1 };
+    /// <summary>Hairline rim of glass panels: a touch brighter on top, like light catching an edge.</summary>
+    internal static readonly LinearGradientBrush GlassRim = new()
+    {
+        EndPoint = new Windows.Foundation.Point(0, 1),
+        GradientStops = { RimTop, RimBottom }
+    };
 
     private static readonly UISettings ui = new();
     private static readonly FontFamily normal = new("Segoe UI Variable Text");
@@ -37,11 +63,33 @@ internal static class Appearance
     private static ProductTheme preference;
     private static ElementTheme theme = ElementTheme.Dark;
 
-    internal static bool AnimationsEnabled => ui.AnimationsEnabled;
+    private static bool translucency = true;
+    private static bool reduceMotion;
+
+    private static bool backdropFailed;
+
+    internal static bool AnimationsEnabled => ui.AnimationsEnabled && !reduceMotion;
+
+    internal static void BackdropUnavailable()
+    {
+        if (backdropFailed) return;
+        backdropFailed = true;
+        Refresh();
+    }
+
+    /// <summary>App-level preferences layered on top of the Windows settings (which always win).</summary>
+    internal static void SetPreferences(bool allowTranslucency, bool reduce)
+    {
+        translucency = allowTranslucency;
+        reduceMotion = reduce;
+        Refresh();
+    }
+    internal static bool IsLight => theme == ElementTheme.Light;
 
     internal static void Initialize(DispatcherQueue dispatcher)
     {
         ui.ColorValuesChanged += (_, _) => dispatcher.TryEnqueue(Refresh);
+        ui.AdvancedEffectsEnabledChanged += (_, _) => dispatcher.TryEnqueue(Refresh);
         Refresh();
     }
 
@@ -56,37 +104,68 @@ internal static class Appearance
         var system = ui.GetColorValue(UIColorType.Background);
         var light = preference == ProductTheme.Light ||
             (preference == ProductTheme.System && system.R + system.G + system.B > 3 * 127);
+        var effects = ui.AdvancedEffectsEnabled && translucency && !backdropFailed;
         theme = light ? ElementTheme.Light : ElementTheme.Dark;
-        Set(Surface, 0xFF1E1E21, 0xFFFBFAF7);
-        Set(Glass, 0xF11E1E21, 0xF2FBFAF7);
-        Set(Panel, 0xFF28282C, 0xFFF2EFE9);
-        Set(Canvas, 0xFF151517, 0xFFEAE7E1);
-        Set(Text, 0xFFF7F4F1, 0xFF292523);
-        Set(Muted, 0xFFB7B0AA, 0xFF635B54);
-        Set(Accent, 0xFFFAB275, 0xFF9E451C);
-        Set(AccentHover, 0xFFFFC38D, 0xFFAD5026);
-        Set(AccentPress, 0xFFE49256, 0xFF803815);
-        Set(SelectionLine, 0xFFAD7853, 0xFFC0886D);
-        Set(OnAccent, 0xFF2E180B, 0xFFFFFAF5);
-        Set(AccentText, 0xFFFFCA9E, 0xFF81360F);
-        Set(Tint, 0xFF3F2B21, 0xFFFBE8D8);
-        Set(Line, 0xFF413D3E, 0xFFDDD6CD);
-        Set(Danger, 0xFFFB8E87, 0xFFAA2E2B);
+        Set(Surface, 0xFF1B1C1F, 0xFFF7F7F8);
+        Set(Chrome, effects ? 0xEB1B1C1Fu : 0xFF1B1C1Fu, effects ? 0xEDF7F7F8u : 0xFFF7F7F8u);
+        Set(Panel, 0xFF242529, 0xFFFFFFFF);
+        Set(Elevated, 0xF5232428, 0xF7FFFFFF);
+        Set(Canvas, 0xFF111214, 0xFFE9E9EC);
+        Set(Text, 0xFFF5F5F7, 0xFF1A1B1E);
+        Set(Muted, 0xFFA0A2AA, 0xFF6A6D75);
+        Set(Faint, 0xFF6E7078, 0xFFA3A5AC);
+        Set(Accent, 0xFFF5F5F7, 0xFF1D1E22);
+        Set(AccentHover, 0xFFFFFFFF, 0xFF34363C);
+        Set(AccentPress, 0xFFD6D7DB, 0xFF0F1012);
+        Set(SelectionLine, 0x22FFFFFF, 0x14000000);
+        Set(OnAccent, 0xFF121315, 0xFFFFFFFF);
+        Set(AccentText, 0xFFFFFFFF, 0xFF1A1B1E);
+        Set(Tint, 0x16FFFFFF, 0x0D000000);
+        Set(Line, 0x14FFFFFF, 0x14000000);
+        Set(Field, 0x0CFFFFFF, 0x08000000);
+        Set(Hover, 0x10FFFFFF, 0x0A000000);
+        Set(Pressed, 0x08FFFFFF, 0x12000000);
+        Set(Rim, 0x1EFFFFFF, 0x1A000000);
+        Set(GlassTint, effects ? 0xD01E1F23u : 0xFF1E1F23u, effects ? 0xD8F8F8FAu : 0xFFF8F8FAu);
+        RimTop.Color = light ? Color.FromArgb(0x24, 0, 0, 0) : Color.FromArgb(0x30, 255, 255, 255);
+        RimBottom.Color = light ? Color.FromArgb(0x1C, 0, 0, 0) : Color.FromArgb(0x12, 255, 255, 255);
+        SelectionTop.Color = light ? Color.FromArgb(0x16, 0, 0, 0) : Color.FromArgb(0x26, 255, 255, 255);
+        SelectionBottom.Color = light ? Color.FromArgb(0x0E, 0, 0, 0) : Color.FromArgb(0x18, 255, 255, 255);
+        Set(Danger, 0xFFFF7870, 0xFFC4302B);
 
         if (NativeWindow.IsHighContrast())
         {
             var foreground = ui.GetColorValue(UIColorType.Foreground);
-            Surface.Color = Glass.Color = Panel.Color = Canvas.Color = Tint.Color = OnAccent.Color = system;
-            Text.Color = Muted.Color = Accent.Color = AccentText.Color = Line.Color = Danger.Color = foreground;
+            Surface.Color = Chrome.Color = Elevated.Color = Panel.Color = Canvas.Color = Tint.Color = OnAccent.Color = GlassTint.Color = system;
+            Text.Color = Muted.Color = Faint.Color = Accent.Color = AccentText.Color = Line.Color = Danger.Color = foreground;
             AccentHover.Color = AccentPress.Color = SelectionLine.Color = foreground;
+            // Translucent so a hovered or pressed button keeps its label readable in high contrast.
+            Hover.Color = Color.FromArgb(0x33, foreground.R, foreground.G, foreground.B);
+            Pressed.Color = Color.FromArgb(0x22, foreground.R, foreground.G, foreground.B);
+            Rim.Color = RimTop.Color = RimBottom.Color = foreground;
+            SelectionTop.Color = SelectionBottom.Color = system;
             theme = ElementTheme.Default;
         }
 
-        foreach (var (window, (root, caption, floating)) in windows)
+        if (Application.Current?.Resources is { } resources)
+        {
+            Shared("HoverFill", Hover.Color);
+            Shared("PressFill", Pressed.Color);
+            Shared("FocusRing", Text.Color);
+            Shared("TipFill", light ? Color.FromArgb(0xF7, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0xF5, 0x26, 0x27, 0x2B));
+            Shared("TipText", Text.Color);
+            Shared("TipLine", Line.Color);
+
+            void Shared(string key, Color color)
+            {
+                if (resources.TryGetValue(key, out var value) && value is SolidColorBrush brush) brush.Color = color;
+            }
+        }
+
+        foreach (var (window, (root, caption, _)) in windows)
         {
             root.RequestedTheme = theme;
             if (caption) StyleTitleBar(window);
-            if (floating) NativeWindow.StyleFloat(window, Line.Color, !light);
         }
 
         void Set(SolidColorBrush brush, uint darkValue, uint lightValue)
@@ -107,12 +186,16 @@ internal static class Appearance
             VerticalAlignment = VerticalAlignment.Center
         };
 
+    /// <summary>Keycap label, e.g. "Ctrl ⇧ 1".</summary>
     internal static Border Key(string key) => new()
     {
-        Child = Label(key, 10, Muted, strong: true), Padding = new Thickness(5, 2, 5, 2),
-        Background = Panel, BorderBrush = Line, BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(5), VerticalAlignment = VerticalAlignment.Center
+        Child = Label(key, 11, Muted), Padding = new Thickness(6, 1, 6, 2), MinWidth = 20,
+        Background = Field, BorderBrush = Line, BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(6), VerticalAlignment = VerticalAlignment.Center
     };
+
+    internal static string ShortcutText(string binding) => string.Join(" ", binding.Split('+', StringSplitOptions.TrimEntries)
+        .Select(part => part.Equals("Shift", StringComparison.OrdinalIgnoreCase) ? "⇧" : part));
 
     internal static Border Mark(double size = 30) => Badge(Glyph.Mark, size);
 
@@ -122,11 +205,34 @@ internal static class Appearance
         Child = Symbols.Draw(glyph, size * 0.62, AccentText), VerticalAlignment = VerticalAlignment.Center
     };
 
-    internal static Border Frame(FrameworkElement child, double radius = 14) => new()
+    internal static Border Frame(FrameworkElement child, double radius = 12) => new()
     {
-        Child = child, Background = Glass, BorderBrush = Line, BorderThickness = new Thickness(1),
+        Child = child, Background = Surface, BorderBrush = Rim, BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(radius)
     };
+
+    /// <summary>Raised in-window card (editor tool bar, properties panel) with the shared soft shadow.</summary>
+    internal static Grid Card(FrameworkElement content, double radius = 14)
+    {
+        var host = new Grid();
+        var shadow = new Grid { IsHitTestVisible = false, Margin = new Thickness(-GlassSurface.Margin) };
+        GlassShadow.Attach(shadow, radius, GlassSurface.Margin);
+        host.Children.Add(shadow);
+        host.Children.Add(new Border
+        {
+            Child = content, Background = Elevated, BorderBrush = GlassRim, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(radius)
+        });
+        return host;
+    }
+
+    /// <summary>Hosts a floating window's content on the shared glass material.</summary>
+    internal static GlassSurface Float(Window window, FrameworkElement content, double radius = 14)
+    {
+        var glass = new GlassSurface(window, content, radius);
+        SetContent(window, glass.Root, floating: true);
+        return glass;
+    }
 
     internal static Button Action(string label, Action? execute = null, Glyph? icon = null, ButtonTone tone = ButtonTone.Quiet)
     {
@@ -167,7 +273,7 @@ internal static class Appearance
     {
         button.Background = tone switch
         {
-            ButtonTone.Primary => Accent, ButtonTone.Selected => Tint, ButtonTone.Raised => Panel, _ => Clear
+            ButtonTone.Primary => Accent, ButtonTone.Selected => Selection, ButtonTone.Raised => Tint, _ => Clear
         };
         button.Foreground = tone switch
         {
@@ -187,25 +293,22 @@ internal static class Appearance
 
     internal static void SetContent(Window window, FrameworkElement root, bool floating = false, string? caption = null)
     {
-        if (floating)
-        {
-            window.SystemBackdrop = new DesktopAcrylicBackdrop();
-            NativeWindow.StyleFloat(window, Line.Color, theme != ElementTheme.Light);
-            if (root is Border frame) frame.CornerRadius = new CornerRadius(8);
-        }
         ApplyNativeAccents(root.Resources, Accent, AccentHover, AccentPress, OnAccent);
         if (caption is not null)
         {
-            var shell = new Grid { Background = Surface };
-            shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(42) });
+            window.SystemBackdrop = new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.Base };
+            var shell = new Grid { Background = Chrome };
+            shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(46) });
             shell.RowDefinitions.Add(new RowDefinition());
             var title = new StackPanel
             {
-                Orientation = Orientation.Horizontal, Spacing = 9, Background = Surface,
-                Padding = new Thickness(13, 0, 138, 0)
+                Orientation = Orientation.Horizontal, Spacing = 10, Background = Clear,
+                Padding = new Thickness(14, 0, 138, 0)
             };
-            title.Children.Add(Mark(25));
-            title.Children.Add(Label(caption, 12, Text, strong: true));
+            title.Children.Add(Mark(26));
+            title.Children.Add(Label("REAL Capture X", 13, Text, strong: true));
+            title.Children.Add(new Border { Width = 1, Height = 14, Background = Line, VerticalAlignment = VerticalAlignment.Center });
+            title.Children.Add(Label(caption, 13, Muted));
             shell.Children.Add(title);
             Grid.SetRow(root, 1);
             shell.Children.Add(root);
@@ -226,6 +329,7 @@ internal static class Appearance
         SolidColorBrush hover, SolidColorBrush press, SolidColorBrush contrast)
     {
         Add(accent, "SliderThumbBackground", "SliderTrackValueFill", "ToggleSwitchFillOn", "ToggleSwitchStrokeOn",
+            "TextControlBorderBrushFocused", "ComboBoxBorderBrushFocused",
             "CheckBoxCheckBackgroundFillChecked", "CheckBoxCheckBackgroundStrokeChecked", "ListViewItemSelectionIndicatorBrush");
         Add(hover, "SliderThumbBackgroundPointerOver", "SliderTrackValueFillPointerOver", "ToggleSwitchFillOnPointerOver",
             "ToggleSwitchStrokeOnPointerOver", "CheckBoxCheckBackgroundFillCheckedPointerOver",
@@ -246,12 +350,14 @@ internal static class Appearance
     private static void StyleTitleBar(Window window)
     {
         var title = window.AppWindow.TitleBar;
-        title.BackgroundColor = title.ButtonBackgroundColor = Surface.Color;
+        title.BackgroundColor = Surface.Color;
+        title.ButtonBackgroundColor = title.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
         title.ForegroundColor = title.ButtonForegroundColor = Text.Color;
-        title.InactiveBackgroundColor = title.ButtonInactiveBackgroundColor = Surface.Color;
+        title.InactiveBackgroundColor = Surface.Color;
         title.InactiveForegroundColor = title.ButtonInactiveForegroundColor = Muted.Color;
-        title.ButtonHoverBackgroundColor = Line.Color;
-        title.ButtonPressedBackgroundColor = Panel.Color;
+        title.ButtonHoverBackgroundColor = Hover.Color;
+        title.ButtonPressedBackgroundColor = Pressed.Color;
+        title.ButtonHoverForegroundColor = title.ButtonPressedForegroundColor = Text.Color;
     }
 
 }
