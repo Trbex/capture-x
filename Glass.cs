@@ -97,6 +97,15 @@ internal sealed class GlassBackdrop : SystemBackdrop
         Layout();
     }
 
+    /// <summary>
+    /// WinUI calls this when the theme or window activation changes. The base implementation is meant for
+    /// MicaController/DesktopAcrylicController configurations and throws E_INVALIDARG for a custom brush,
+    /// which crashed the app on a theme switch. The glass tint follows the theme in XAML, so nothing to do here.
+    /// </summary>
+    protected override void OnDefaultSystemBackdropConfigurationChanged(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
+    {
+    }
+
     private void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => Layout();
 
     private void Layout()

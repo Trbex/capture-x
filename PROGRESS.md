@@ -1,39 +1,40 @@
-# REAL Capture X 0.2.0 · průběh vývoje
+# Implementation and verification
 
-## Funkční parita
+REAL Capture X is a native .NET 10 and WinUI 3 desktop application. These notes distinguish the Windows configurations exercised during development from the work that still needs hardware or compatibility testing.
 
-| Funkce | Stav |
-| --- | --- |
-| Nativní základ .NET 10 / WinUI 3 | Sestaven a spuštěn na Windows 11 Home x64. |
-| Výběr oblasti, okna a monitoru | Ověřeno po redesignu. Výřez 528 × 276 na monitoru vlevo od hlavního, samostatné okno 666 × 463 a displej 1920 × 1080. Escape obnoví náhled. |
-| All-in-One | Šest přímých režimů, vlastní podnabídky mimo okraj lišty, opakování výřezu a Shift pro čtverec. Otevřeno zadání přesných rozměrů, pokročilá lupa a vícemonitorový výřez. |
-| Quick Access | Kompaktní náhled s výškou podle snímku, vlastní kontextové akce a procházení historie. Ověřen náhled, obnovení, schránka, časovač a export. Exportovaný PNG je podle SHA-256 shodný s originálem. Přetažení implementováno. Zbývá ověřit cílové aplikace a pozice při smíšeném DPI. |
-| Anotační editor | Win2D, šipka, tvary, kreslení, text, zvýraznění, číslování, černá redakce, ořez, krok zpět a vpřed. Ověřeny šipka, obdélník, Undo a Redo i export PNG s očekávanými změnami pixelů. Otevřeny editovatelné soubory projektu, výběr a přesun vytvořených značek a pokročilé nástroje. |
-| Přizpůsobení pozadí | Vlastní barva, odsazení, zaoblení a poměr stran v pravém panelu. Ověřen vliv zapnutého pozadí na rozměry. Otevřeny vlastní obrázky pozadí, uložené presety, stín a Auto Balance. |
-| Scrolling capture | Živě ověřen plovoucí ukazatel, svislé skládání a PNG 695 × 1079 v novém rozhraní. Vodorovný režim sdílí algoritmus po transpozici. Otevřeno automatické rolování a kompatibilita s lepkavým obsahem. |
-| OCR | Offline angličtina a čeština. Zkopírování textu ze snímku ověřeno na syntetickém vzoru. Pokrytí jazyků a QR zatím omezené. |
-| Připnutí snímku | Vizuálně ověřeno samostatné plovoucí okno. Ověřeno připnutí z nového Quick Access. Posun a volba velikosti zůstávají dostupné. Otevřena průhlednost a režim proklikávání. |
-| Nahrávání | Živě ověřen záznam displeje H.264, 1920 × 1080, 30 fps, 193 snímků. Ověřena oblast 698 × 456 a kompaktní panel s živými stopkami. Volitelný mikrofon, systémový zvuk, webkamera a chytrý zoom jsou součástí nastavení před záznamem. Reálné ověření audio a video zařízení ještě chybí. |
-| Studio Mode | Záznam se automaticky otevřel v přehrávači. Ověřen export přesného střihu z 6,433 s na 3,000 s v H.264, 1920 × 1080 a 30 fps. Nové rozhraní ověřeno střihovým exportem 1,380 s dle ffprobe. Hlasitost se nastavuje ve Studiu a chytrý zoom před záznamem. Otevřena postprodukční editace zoomů, kurzoru, kamery a vícestopý střih. |
-| Historie | Oddělené seznamy snímků a videí s živým náhledem a otevřením v editoru nebo Studiu. Otevřeno vyhledávání a retence. |
-| Zkratky a oznamovací oblast | Zkratky ověřeny včetně uložení a registrace jiné kombinace. Nová vlastní nabídka s klávesnicí, zkratkami a kotvou na oznamovací ikoně. Vizuálně ověřena stejná nabídka z lišty. |
-| Nastavení | Systémový, světlý a tmavý motiv s živým náhledem, oddělené kategorie pro Quick Access a klávesy. Ověřeno uložení motivu a jeho obnovení po startu. Otevřené volby podrobněji v Obsidianu. |
+## Capture and annotation
 
-## Ověření a omezení
+| Area | Observed behavior | Open work |
+| --- | --- | --- |
+| Region, window and display | Captured a 528 × 276 region on a monitor to the left of the primary display, a 666 × 463 window and a 1920 × 1080 display. Escape restored the preview. | Selections spanning multiple monitors, HDR and mixed DPI. |
+| Capture toolbar | Six direct modes, repeat-region capture, keyboard navigation and square selection with Shift. The region overlay shows a magnifier, dimensions and the color under the pointer. | Numeric region dimensions and broader multi-monitor coverage. |
+| Quick Access | Preview, restore, auto-hide, copy and export were exercised. The exported PNG matched the original SHA-256. Hover reveals the controls, and the card supports file dragging. | Drop targets in other applications and card placement on mixed-DPI monitors. |
+| Annotate | Drew and selected marks, moved a rectangle, checked resize handles, undo, redo and zoom. Copy produced a 1400 × 850 image. A PNG export changed only the pixels around the test arrow. The editor also provides inline text, numbering, highlight, blur, pixelation, redaction and crop. | Editable project files. |
+| Background | Solid color, padding, corner radius and aspect ratio are available. Enabling the background changed the exported dimensions as expected. | Custom background images, saved presets, background shadows and automatic balancing. |
+| Scrolling capture | The floating indicator and vertical stitching produced a 695 × 1079 PNG. Horizontal stitching uses the same algorithm on transposed frames. | Live coverage of horizontal scrolling, automatic scrolling and pages with sticky elements. |
+| OCR | Bundled Tesseract data covers English and Czech. Copying recognized text worked on a synthetic sample. | Broader language coverage and QR recognition. |
+| Pinned images | Opened a separate floating reference from Quick Access. Move and resize controls are implemented. | Click-through and opacity controls. |
 
-- Debug `--self-check` ověřuje přesné kopírování pixelů, odmítnutí identického snímku, skládání obrazu, transpozici a mapování kláves.
-- Self-contained Release x64 byl sestaven a spuštěn po doplnění indexu WinUI prostředků. Distribuce je v `artifacts/REAL-Capture-X-0.2.0-win-x64.zip`.
-- Audit závislostí verze 0.1.0 nenašel známé zranitelné balíčky. Verze 0.2.0 používá stejné závislosti.
-- Tři vizuální iterace ve skutečné aplikaci upravily zejména hustotu plovoucí nabídky, kontrast prvků obou motivů, vrstvení oken a výšku přehrávače. Obrazová dokumentace je v Obsidianu.
-- Vizuální a interakční testy používají testovací profil a syntetické podklady. Pro přesné ověření kompatibility zbývají HDR, smíšené DPI, přetažení mezi aplikacemi a dlouhé záznamy s více zdroji.
-- Rozhraní má vlastní styl pro Windows. Studium reference vychází z oficiálních veřejných materiálů a videí. Profil na X odpověděl HTTP 403.
+## Recording and desktop integration
 
-## Reference
+| Area | Observed behavior | Open work |
+| --- | --- | --- |
+| Recording | Captured a 1920 × 1080 H.264 video at 30 fps (193 frames) and a 698 × 456 region. The compact controls showed elapsed time. Setup exposes microphone, system audio, webcam and smart zoom options. | Physical input/output devices and extended multi-source sessions. |
+| Studio | A recording opened automatically. A 6.433-second H.264 clip exported to 3.000 seconds at 1920 × 1080 and 30 fps. A separate trim in the redesigned UI measured 1.380 seconds with ffprobe. Volume is adjustable in Studio. | Post-capture editing of zoom, cursor and camera effects, and multitrack editing. |
+| History | Screenshots and recordings have separate lists, previews and actions to open Annotate or Studio. | Search and retention controls. |
+| Tray and shortcuts | Registered and saved a replacement global shortcut. The tray and toolbar menus share keyboard navigation and shortcut hints. | Broader testing of hotkey conflicts with other utilities. |
+| Appearance | System, Light and Dark provide live previews. A saved theme survived a restart. Reduced motion and translucency preferences are implemented. | Visual inspection of capture-excluded surfaces on physical displays at additional scales. |
 
-- [CleanShot X · produktové demo](https://cleanshot.com/)
-- [CleanShot X · snímky](https://cleanshot.com/screenshots)
-- [CleanShot X · funkce](https://cleanshot.com/features)
-- [CleanShot X · changelog](https://cleanshot.com/changelog)
-- [Ukázka Quick Access](https://cleanshot.com/video/home/quickaccess.mp4)
+## Release checks
 
-Podrobný výzkum, architektura a ověření jsou v projektové složce `Codex/Záznamy/Projekty/REAL Capture X` v existujícím Obsidianu.
+- **0.2.1 regressions.** With the floating toolbar alive, repeated Dark, Light and System selections in one Windows process. The settings surface visibly changed each time the effective theme changed. At 100% scaling the recording setup window measured 424 × 292 physical pixels including its shadow margins. The entire 38-pixel Start recording button was visible, with 7 pixels below it inside the panel.
+- **Debug self-check.** The Debug executable accepts `--self-check` and verifies pixel copying, duplicate-frame rejection, stitching, transposition and virtual-key mapping.
+- **Portable packaging.** The 0.2.0 self-contained x64 build was launched with the WinUI resource index included. The build workflow checks the application, native libraries, runtime, OCR data and third-party notices before packaging.
+- **Visual QA.** Three passes in the running application covered menu density, contrast in both themes, window layering, player height and transitions. Product screenshots and animations use an isolated profile and synthetic content.
+- **Dependency history.** The 0.1.0 audit reported no known vulnerable packages at the time. Version 0.2.0 retained those dependencies.
+
+## Design references
+
+The interface uses native Windows controls and materials. The original design study used public CleanShot X product material. Access to its X profile returned HTTP 403 during that study.
+
+[Product demo](https://cleanshot.com/) · [Screenshots](https://cleanshot.com/screenshots) · [Features](https://cleanshot.com/features) · [Changelog](https://cleanshot.com/changelog) · [Quick Access demonstration](https://cleanshot.com/video/home/quickaccess.mp4)
