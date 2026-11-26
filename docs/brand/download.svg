@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="246" height="52" viewBox="0 0 246 52" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" width="272" height="52" viewBox="0 0 272 52" role="img" aria-labelledby="title">
   <title id="title">Download for Windows x64</title>
-  <rect x=".5" y=".5" width="245" height="51" rx="10" fill="#222427" stroke="#65686d"/>
+  <rect x=".5" y=".5" width="271" height="51" rx="10" fill="#222427" stroke="#65686d"/>
   <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8">
     <path d="M28 16v14m-5-5 5 5 5-5m-14 5v5h18v-5"/>
   </g>
-  <text x="50" y="32" font-family="Segoe UI,Arial,sans-serif" font-weight="600" font-size="16" fill="#fff">Download for Windows x64</text>
+  <text x="50" y="32" textLength="199" lengthAdjust="spacingAndGlyphs" font-family="Segoe UI,Arial,sans-serif" font-weight="600" font-size="16" fill="#fff">Download for Windows x64</text>
 </svg>
