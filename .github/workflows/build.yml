@@ -1,0 +1,176 @@
+name: Build
+
+# Windows x64 Release build of the portable (self-contained, unpackaged) REAL Capture X.
+# - push to main, pull requests and manual runs: build, verify, upload the portable app as an artifact
+# - version tags (v1.2.3, v1.2.3-beta.1): additionally publish the ZIP to GitHub Releases
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  NUGET_PACKAGES: ${{ github.workspace }}\.nuget\packages
+  PROJECT: RealCaptureX.csproj
+  RUNTIME: win-x64
+  PUBLISH_DIR: publish\RealCaptureX
+
+jobs:
+  build:
+    name: Build portable win-x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      package: ${{ steps.version.outputs.package }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Resolve version
+        id: version
+        run: |
+          [xml]$project = Get-Content $env:PROJECT
+          $declared = ($project.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
+          if (-not $declared) { throw "No <Version> in $env:PROJECT" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -notmatch '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
+              throw "Tag '$env:GITHUB_REF_NAME' is not a version tag like v1.2.3 or v1.2.3-beta.1"
+            }
+            $version = $Matches[1]
+            $label = $version
+          } else {
+            $version = $declared
+            $label = "$declared-build.$env:GITHUB_RUN_NUMBER"
+          }
+          $package = "REAL-Capture-X-$label-$env:RUNTIME"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "package=$package" >> $env:GITHUB_OUTPUT
+          Write-Host "Project version $declared, build version $version, package $package"
+
+      - name: Restore
+        run: dotnet restore $env:PROJECT -r $env:RUNTIME
+
+      - name: Publish self-contained portable app
+        run: >
+          dotnet publish $env:PROJECT
+          --configuration Release
+          --runtime $env:RUNTIME
+          --self-contained
+          --no-restore
+          --output $env:PUBLISH_DIR
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Verify published files
+        run: |
+          $root = Resolve-Path $env:PUBLISH_DIR
+          # App, WinUI resource index (without it the unpackaged app cannot load its XAML styles),
+          # .NET and Windows App SDK runtimes, Win2D, OCR (Tesseract + language data) and audio.
+          $required = @(
+            'RealCaptureX.exe', 'RealCaptureX.dll', 'RealCaptureX.pri',
+            'RealCaptureX.deps.json', 'RealCaptureX.runtimeconfig.json',
+            'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll',
+            'Microsoft.ui.xaml.dll', 'Microsoft.WindowsAppRuntime.dll', 'Microsoft.WindowsAppRuntime.Bootstrap.dll',
+            'Microsoft.Windows.SDK.NET.dll', 'WinRT.Runtime.dll',
+            'Microsoft.Graphics.Canvas.dll', 'Microsoft.Graphics.Canvas.Interop.dll',
+            'Tesseract.dll', 'x64\tesseract50.dll', 'x64\leptonica-1.82.0.dll',
+            'NAudio.Core.dll', 'NAudio.Wasapi.dll',
+            'Assets\tessdata\eng.traineddata', 'Assets\tessdata\ces.traineddata', 'Assets\tessdata\LICENSE',
+            'Assets\Licenses\Leptonica.txt', 'Assets\Licenses\NAudio.txt',
+            'THIRD-PARTY-NOTICES.md'
+          )
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path $root $_)) }
+          if ($missing) {
+            Write-Host "Published files:"; Get-ChildItem $root -Recurse -File | ForEach-Object { $_.FullName.Substring($root.Path.Length + 1) } | Sort-Object
+            throw "Missing required files: $($missing -join ', ')"
+          }
+          $files = Get-ChildItem $root -Recurse -File
+          $size = ($files | Measure-Object Length -Sum).Sum / 1MB
+          "Verified $($required.Count) required files; $($files.Count) files, {0:N1} MB in total." -f $size | Write-Host
+          $exe = Get-Item (Join-Path $root 'RealCaptureX.exe')
+          "RealCaptureX.exe file version: $($exe.VersionInfo.FileVersion), product version: $($exe.VersionInfo.ProductVersion)" | Write-Host
+          "### Portable build verified`n`n$($files.Count) files, {0:N1} MB, version ${{ steps.version.outputs.version }}" -f $size >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Create portable ZIP
+        run: |
+          $zip = "${{ steps.version.outputs.package }}.zip"
+          7z a -tzip -mx=7 $zip ".\$env:PUBLISH_DIR\*" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit code $LASTEXITCODE" }
+          $listing = 7z l -ba -slt $zip | Select-String '^Path = ' | ForEach-Object { $_.Line.Substring(7) }
+          foreach ($entry in 'RealCaptureX.exe', 'RealCaptureX.pri', 'Assets\tessdata\eng.traineddata', 'x64\tesseract50.dll') {
+            if ($listing -notcontains $entry) { throw "ZIP is missing $entry" }
+          }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zip" | Set-Content "$zip.sha256" -Encoding ascii
+          "{0}: {1:N1} MB, {2} entries, SHA-256 {3}" -f $zip, ((Get-Item $zip).Length / 1MB), $listing.Count, $hash | Write-Host
+
+      - name: Upload portable app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.package }}
+          path: |
+            ${{ steps.version.outputs.package }}.zip
+            ${{ steps.version.outputs.package }}.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download portable app artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.package }}
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PACKAGE: ${{ needs.build.outputs.package }}
+        run: |
+          set -euo pipefail
+          test -s "$PACKAGE.zip"
+          prerelease=""
+          if [[ "$VERSION" == *-* ]]; then prerelease="--prerelease"; fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$PACKAGE.zip" "$PACKAGE.zip.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$PACKAGE.zip" "$PACKAGE.zip.sha256" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "REAL Capture X $VERSION" --generate-notes $prerelease
+          fi
