@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">REAL Capture X</title>
+  <defs>
+    <linearGradient id="graphite" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#353638"/>
+      <stop offset="1" stop-color="#17181a"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#graphite)" stroke="#57585a" stroke-width="2"/>
+  <path d="M13 41V20l25-5v7l-18 4v13z" fill="#fff"/>
+  <path d="M51 23v21l-25 5v-7l18-4V25z" fill="#d2d3d4"/>
+</svg>

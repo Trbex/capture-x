@@ -1,0 +1,29 @@
+name: Bug report
+description: Report an unexpected result in the Windows application.
+title: "[Bug] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: App version and Windows build
+      placeholder: "0.2.1 · Windows 11 build 26100"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start with the capture mode or shortcut you used.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Display, device or screenshot details
+      description: Include scaling, monitor layout or recording sources if relevant. Use synthetic content in attachments.
