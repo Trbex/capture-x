@@ -46,7 +46,7 @@ internal sealed class StudioWindow : Window
 
         var edit = new StackPanel
         {
-            Background = Appearance.Panel, Spacing = 10, Padding = new Thickness(14, 11, 14, 13)
+            Background = Appearance.Clear, Spacing = 12, Padding = new Thickness(18, 8, 18, 14)
         };
         var header = new Grid();
         header.Children.Add(Appearance.Label("Trim recording", 13, strong: true));
@@ -54,11 +54,11 @@ internal sealed class StudioWindow : Window
         header.Children.Add(rangeLabel);
         edit.Children.Add(header);
 
-        var track = new Grid { Height = 6, Background = Appearance.Canvas, CornerRadius = new CornerRadius(3) };
+        var track = new Grid { Height = 8, Background = Appearance.Tint, CornerRadius = new CornerRadius(4) };
         track.ColumnDefinitions.Add(before);
         track.ColumnDefinitions.Add(chosen);
         track.ColumnDefinitions.Add(after);
-        var highlight = new Border { Background = Appearance.Accent, CornerRadius = new CornerRadius(3) };
+        var highlight = new Border { Background = Appearance.Accent, CornerRadius = new CornerRadius(4) };
         Grid.SetColumn(highlight, 1);
         track.Children.Add(highlight);
         edit.Children.Add(track);
@@ -141,7 +141,7 @@ internal sealed class StudioWindow : Window
         file = selected;
         duration = clip.OriginalDuration;
         start.Maximum = end.Maximum = duration.TotalSeconds;
-        end.Value = duration.TotalSeconds;
+        end.Value = Math.Floor(duration.TotalSeconds * 100) / 100;
         player.Source = MediaSource.CreateFromStorageFile(selected);
         UpdateRange();
         status.Text = $"{selected.Name}  ·  {duration:mm\\:ss}";
@@ -170,7 +170,7 @@ internal sealed class StudioWindow : Window
                 SuggestedStartLocation = PickerLocationId.VideosLibrary, DefaultFileExtension = ".mp4"
             };
 #if DEBUG
-            if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") == "1")
+            if (QaMode.Profile)
             {
                 picker.SuggestedFolder = Path.Combine(CaptureStore.Root, "Exports");
                 Directory.CreateDirectory(picker.SuggestedFolder);

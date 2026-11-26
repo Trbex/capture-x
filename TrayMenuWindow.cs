@@ -5,23 +5,34 @@ using static RealCaptureX.CaptureMenu;
 
 namespace RealCaptureX;
 
+/// <summary>
+/// The one popup menu window of the app: tray menu, toolbar quick menu and every context menu. It is a
+/// glass window positioned next to an anchor rectangle and dismissed on deactivation or Escape.
+/// </summary>
 internal sealed class TrayMenuWindow : Window
 {
+    internal static TrayMenuWindow? Shared { get; private set; }
+
     private readonly Grid host = new();
+    private readonly ScrollViewer scroller;
+    private readonly GlassSurface glass;
     private readonly Action<CaptureCommand> execute;
-    private const int Width = 304;
+    private Action? closed;
     private bool dismissing;
     private int revision;
 
     public TrayMenuWindow(Action<CaptureCommand> execute)
     {
         this.execute = execute;
+        Shared = this;
         Title = "REAL Capture X — Commands";
         NativeWindow.ToolWindow(this);
-        Appearance.SetContent(this, Appearance.Frame(new ScrollViewer
+        NativeWindow.ExcludeOverlayFromCapture(this);
+        scroller = new ScrollViewer
         {
             Content = host, HorizontalScrollMode = ScrollMode.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        }), floating: true);
+        };
+        glass = Appearance.Float(this, scroller, radius: 14);
 
         Activated += (_, e) =>
         {
@@ -36,46 +47,65 @@ internal sealed class TrayMenuWindow : Window
         };
     }
 
-    public void Show(NativeWindow.Rect anchor, string[] shortcuts)
+    public void Show(NativeWindow.Rect anchor, string[] shortcuts, bool compact)
     {
-        revision++;
-        dismissing = false;
-        host.IsHitTestVisible = true;
-        host.Children.Clear();
-
         MenuAction Action(CaptureCommand command, string label, Glyph icon, int key = -1) =>
             Mode(command, label, icon, execute, key < 0 ? null : shortcuts[key]);
 
-        var content = new CaptureMenu("REAL Capture X", [
-            new("Capture",
-                Action(CaptureCommand.Region, "Capture region", Glyph.Region, 0),
-                Action(CaptureCommand.Window, "Capture window", Glyph.Window, 1),
-                Action(CaptureCommand.Display, "Capture display", Glyph.Display, 2),
-                Action(CaptureCommand.RepeatRegion, "Repeat last region", Glyph.Repeat),
-                Action(CaptureCommand.Scroll, "Scrolling capture", Glyph.Scroll),
-                Action(CaptureCommand.ScrollHorizontal, "Horizontal scrolling", Glyph.HorizontalScroll),
-                Action(CaptureCommand.Text, "Capture text", Glyph.Scan)),
-            new("Record",
-                Action(CaptureCommand.RecordRegion, "Record region", Glyph.Video),
-                Action(CaptureCommand.RecordDisplay, "Record display", Glyph.Display)),
-            new("Workspace",
-                Action(CaptureCommand.Toolbar, "Capture toolbar", Glyph.Mark, 3),
-                Action(CaptureCommand.Recent, "Quick Access", Glyph.Image, 4),
-                Action(CaptureCommand.History, "Capture history", Glyph.History),
-                Action(CaptureCommand.OpenStudio, "Open video in Studio", Glyph.Studio),
-                Action(CaptureCommand.Settings, "Settings", Glyph.Settings)),
-            new(null, Action(CaptureCommand.Exit, "Quit REAL Capture X", Glyph.Power))
-        ], run =>
+        var capture = new MenuSection("Capture",
+            Action(CaptureCommand.Region, "Capture region", Glyph.Region, 0),
+            Action(CaptureCommand.Window, "Capture window", Glyph.Window, 1),
+            Action(CaptureCommand.Display, "Capture display", Glyph.Display, 2),
+            Action(CaptureCommand.RepeatRegion, "Repeat last region", Glyph.Repeat),
+            Action(CaptureCommand.Scroll, "Scrolling capture", Glyph.Scroll),
+            Action(CaptureCommand.ScrollHorizontal, "Horizontal scrolling", Glyph.HorizontalScroll),
+            Action(CaptureCommand.Text, "Capture text (OCR)", Glyph.Scan));
+        var quickAccess = Action(CaptureCommand.Recent, "Quick Access", Glyph.Image, 4);
+        var studio = Action(CaptureCommand.OpenStudio, "Open video in Studio", Glyph.Studio);
+        var history = Action(CaptureCommand.History, "Capture history", Glyph.History);
+        MenuSection[] sections = compact
+            ? [capture with { Actions = [.. capture.Actions.Where(a => a.Label != "Horizontal scrolling")] },
+                new("Workspace", quickAccess, studio)]
+            : [
+                capture,
+                new("Workspace", Action(CaptureCommand.Toolbar, "Capture toolbar", Glyph.Mark, 3), quickAccess, history, studio),
+                new("Record",
+                    Action(CaptureCommand.RecordRegion, "Record region", Glyph.Video),
+                    Action(CaptureCommand.RecordDisplay, "Record display", Glyph.Display)),
+                new(null, Action(CaptureCommand.Exit, "Quit REAL Capture X", Glyph.Power))
+            ];
+        var header = compact ? null : new MenuHeader("REAL Capture X",
+            new MenuAction("Settings", Glyph.Gear, () => execute(CaptureCommand.Settings)),
+            new MenuAction("Capture history", Glyph.History, () => execute(CaptureCommand.History)));
+        Title = compact ? "REAL Capture X — Quick menu" : "REAL Capture X — Commands";
+        ShowMenu(anchor, header, sections, compact ? 300 : 320);
+    }
+
+    /// <summary>Opens any command list next to an anchor (physical screen pixels).</summary>
+    public void ShowMenu(NativeWindow.Rect anchor, MenuHeader? header, MenuSection[] sections, int width = 280,
+        bool alignLeft = false, Action? onClosed = null)
+    {
+        closed?.Invoke();
+        closed = onClosed;
+        revision++;
+        dismissing = false;
+        glass.Panel.IsHitTestVisible = true;
+        host.Children.Clear();
+        var content = new CaptureMenu(header, sections, run =>
         {
             HideNow();
             run();
         });
         host.Children.Add(content);
-        content.Measure(new Windows.Foundation.Size(Width - 2, double.PositiveInfinity));
-        NativeWindow.PlacePopup(this, anchor, Width, (int)Math.Ceiling(content.DesiredSize.Height) + 2);
-        ProductMotion.Enter((FrameworkElement)Content);
+        content.Measure(new Windows.Foundation.Size(width - 2, double.PositiveInfinity));
+        var height = (int)Math.Ceiling(content.DesiredSize.Height) + 2;
+        var above = NativeWindow.PlacePopup(this, anchor, GlassSurface.Outer(width), GlassSurface.Outer(height),
+            GlassSurface.Margin, alignLeft);
+        scroller.ChangeView(null, 0, null, disableAnimation: true);
         Activate();
         NativeWindow.SetForegroundWindow(NativeWindow.Handle(this));
+        glass.Enter(rise: above ? 8 : -8);
+        content.Stagger(above ? 4 : -4);
         content.FocusFirst();
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -88,6 +118,9 @@ internal sealed class TrayMenuWindow : Window
         revision++;
         dismissing = false;
         AppWindow.Hide();
+        var callback = closed;
+        closed = null;
+        callback?.Invoke();
     }
 
     private async Task DismissAsync()
@@ -95,8 +128,8 @@ internal sealed class TrayMenuWindow : Window
         if (dismissing || !AppWindow.IsVisible) return;
         dismissing = true;
         var current = ++revision;
-        host.IsHitTestVisible = false;
-        await ProductMotion.ExitAsync((FrameworkElement)Content);
+        glass.Panel.IsHitTestVisible = false;
+        await glass.ExitAsync();
         if (current == revision) HideNow();
     }
 }

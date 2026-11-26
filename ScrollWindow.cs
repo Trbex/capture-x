@@ -10,6 +10,7 @@ internal sealed class ScrollWindow : Window
     private readonly TextBlock status;
     private readonly bool horizontal;
     private readonly string direction;
+    private readonly GlassSurface glass;
     private bool commit;
     private bool closed;
 
@@ -20,8 +21,8 @@ internal sealed class ScrollWindow : Window
         status = Appearance.Label(direction, 12, Appearance.Muted);
         Title = "REAL Capture X — Scrolling Capture";
         NativeWindow.ToolWindow(this);
-        var panel = new StackPanel { Padding = new Thickness(11), Spacing = 10 };
-        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9 };
+        var panel = new StackPanel { Padding = new Thickness(14, 12, 12, 12), Spacing = 11 };
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 11 };
         header.Children.Add(Appearance.Badge(horizontal ? Glyph.HorizontalScroll : Glyph.Scroll, 34));
         var title = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(Appearance.Label("Scrolling capture", 14, strong: true));
@@ -33,11 +34,11 @@ internal sealed class ScrollWindow : Window
         {
             Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right
         };
-        buttons.Children.Add(Appearance.Action("Cancel", Close));
+        buttons.Children.Add(Appearance.Action("Cancel", Close, tone: ButtonTone.Raised));
         var finish = Appearance.Action("Finish", () => { commit = true; done.Cancel(); }, Glyph.Check, ButtonTone.Primary);
         buttons.Children.Add(finish);
         panel.Children.Add(buttons);
-        Appearance.SetContent(this, Appearance.Frame(panel), floating: true);
+        glass = Appearance.Float(this, panel, radius: 14);
         Closed += (_, _) => { closed = true; done.Cancel(); };
     }
 
@@ -50,13 +51,13 @@ internal sealed class ScrollWindow : Window
         }
         var display = NativeWindow.GetMonitor(monitor).Bounds;
         var anchorX = area.X + area.Width / 2 < display.Width / 2 ? 1 : 0;
-        NativeWindow.Place(this, monitor, 324, 115, anchorX, 0);
+        NativeWindow.Place(this, monitor, GlassSurface.Outer(340), GlassSurface.Outer(124), anchorX, 0, GlassSurface.Margin);
 #if DEBUG
-        if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") != "1")
+        if (!QaMode.Inspect)
 #endif
             NativeWindow.ExcludeFromCapture(this);
-        ProductMotion.Enter((FrameworkElement)Content);
         AppWindow.Show(false);
+        glass.Enter(rise: -10);
         var cancellation = done.Token;
         var dispatcher = DispatcherQueue;
         try

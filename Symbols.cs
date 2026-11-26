@@ -12,7 +12,8 @@ internal enum Glyph
     Mark, Region, Window, Display, Video, History, Settings, More, Close, Copy, Save, Check, Pin, Scan,
     Repeat, Scroll, HorizontalScroll, Studio, Power, Arrow, Box, Oval, Pen, Highlight, Redact, Text,
     Step, Crop, Undo, Redo, Background, Back, Next, Scale, Grip, Sun, Moon, System, Mic, Audio,
-    Cursor, Zoom, Stop, Trash, Image, Play, Pause, Keyboard, ChevronDown
+    Cursor, Zoom, Stop, Trash, Image, Play, Pause, Keyboard, ChevronDown, Gear, ClearFill,
+    Pixelate, Plus, Minus, Fit, Select
 }
 
 internal static class Symbols
@@ -37,11 +38,13 @@ internal static class Symbols
     private static string Data(Glyph glyph) => glyph switch
     {
         Glyph.Mark => "M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15 M9 15 L15 9 M11.5 9 H15 V12.5",
-        Glyph.Region => "M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15 M9.5 12 H14.5 M12 9.5 V14.5",
+        Glyph.Region => "M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15 M12 10.2 V13.8 M10.2 12 H13.8",
         Glyph.Window => "M4 5 H20 C21 5 21 6 21 7 V17 C21 18 20 19 19 19 H5 C4 19 3 18 3 17 V7 C3 6 3 5 4 5 Z M3 9 H21 M6 7 H6.5 M8.7 7 H9.2",
         Glyph.Display => "M4 4.5 H20 C21 4.5 21 5.5 21 6.5 V15 C21 16 20 16.5 19 16.5 H5 C4 16.5 3 16 3 15 V6.5 C3 5.5 3 4.5 4 4.5 Z M12 16.5 V20 M8 20 H16",
         Glyph.Video => "M4 6 H14 C15 6 16 7 16 8 V16 C16 17 15 18 14 18 H4 C3 18 2.5 17 2.5 16 V8 C2.5 7 3 6 4 6 Z M16 10 L21 7.5 V16.5 L16 14",
         Glyph.History => "M4.5 7 A8.5 8.5 0 1 1 3.5 14 M3 4 V9 H8 M12 7 V12 L15 14",
+        Glyph.ClearFill => "M19.5 12 A7.5 7.5 0 1 0 4.5 12 A7.5 7.5 0 1 0 19.5 12 M6.7 17.3 L17.3 6.7",
+        Glyph.Gear => "M10 3 H14 L14.5 5.5 L16 6.4 L18.5 5.6 L20.5 9 L18.7 10.8 V13.2 L20.5 15 L18.5 18.4 L16 17.6 L14.5 18.5 L14 21 H10 L9.5 18.5 L8 17.6 L5.5 18.4 L3.5 15 L5.3 13.2 V10.8 L3.5 9 L5.5 5.6 L8 6.4 L9.5 5.5 Z M15 12 A3 3 0 1 0 9 12 A3 3 0 1 0 15 12",
         Glyph.Settings => "M5 5 V19 M12 5 V19 M19 5 V19 M2.5 9 H7.5 M9.5 15 H14.5 M16.5 10 H21.5",
         Glyph.More => "M5.5 12 A.6 .6 0 1 0 4.3 12 A.6 .6 0 1 0 5.5 12 M12.6 12 A.6 .6 0 1 0 11.4 12 A.6 .6 0 1 0 12.6 12 M19.7 12 A.6 .6 0 1 0 18.5 12 A.6 .6 0 1 0 19.7 12",
         Glyph.Close => "M6 6 L18 18 M18 6 L6 18",
@@ -85,6 +88,11 @@ internal static class Symbols
         Glyph.Pause => "M9 5.5 V18.5 M15 5.5 V18.5",
         Glyph.Keyboard => "M4 6 H20 Q21 6 21 8 V16 Q21 18 20 18 H4 Q3 18 3 16 V8 Q3 6 4 6 Z M7 10 H7.2 M10.5 10 H10.7 M14 10 H14.2 M17.5 10 H17.7 M7 14 H17",
         Glyph.ChevronDown => "M6 9 L12 15 L18 9",
+        Glyph.Pixelate => "M4 4 H9 V9 H4 Z M15 4 H20 V9 H15 Z M9.5 9.5 H14.5 V14.5 H9.5 Z M4 15 H9 V20 H4 Z M15 15 H20 V20 H15 Z",
+        Glyph.Plus => "M12 5 V19 M5 12 H19",
+        Glyph.Minus => "M5 12 H19",
+        Glyph.Fit => "M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15 M9 9 H15 V15 H9 Z",
+        Glyph.Select => "M6 3.5 L18.5 12.2 L12.6 13.4 L9.6 19.2 Z",
         _ => throw new ArgumentOutOfRangeException(nameof(glyph))
     };
 }

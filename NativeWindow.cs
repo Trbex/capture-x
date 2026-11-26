@@ -62,7 +62,7 @@ internal static class NativeWindow
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(nint hwnd);
     [DllImport("user32.dll")] private static extern nint WindowFromPoint(Point point);
     [DllImport("user32.dll")] private static extern nint GetAncestor(nint hwnd, uint flags);
-    [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
     [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(nint hwnd, nint order, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
@@ -86,7 +86,20 @@ internal static class NativeWindow
     internal static nint Handle(Window window) => WinRT.Interop.WindowNative.GetWindowHandle(window);
     internal static bool LeftPointerPressed() => (GetAsyncKeyState(1) & 0x8000) != 0;
 
-    internal static void ExcludeFromCapture(Window window) => SetWindowDisplayAffinity(Handle(window), 0x11);
+    internal static void ExcludeFromCapture(Window window)
+    {
+        var applied = SetWindowDisplayAffinity(Handle(window), 0x11);
+        Diagnostics.Log($"ExcludeFromCapture '{window.Title}' ok={applied} error={(applied ? 0 : Marshal.GetLastWin32Error())}");
+    }
+
+    /// <summary>App chrome never shows up in a capture; QA inspection builds keep it visible to test tools.</summary>
+    internal static void ExcludeOverlayFromCapture(Window window)
+    {
+#if DEBUG
+        if (QaMode.Inspect) return;
+#endif
+        ExcludeFromCapture(window);
+    }
 
     internal static nint CursorMonitor()
     {
@@ -118,7 +131,7 @@ internal static class NativeWindow
         presenter.IsAlwaysOnTop = true;
         var showInSwitchers = false;
 #if DEBUG
-        showInSwitchers = Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") == "1";
+        showInSwitchers = QaMode.Inspect;
 #endif
         window.AppWindow.IsShownInSwitchers = showInSwitchers;
         var hwnd = Handle(window);
@@ -129,31 +142,80 @@ internal static class NativeWindow
         DwmSetWindowAttribute(hwnd, 33, rounded ? 2 : 1, sizeof(int));
     }
 
-    internal static void StyleFloat(Window window, Windows.UI.Color border, bool dark)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BlurBehind
+    {
+        public uint Flags;
+        public int Enable;
+        public nint Region;
+        public int Transition;
+    }
+
+    [DllImport("dwmapi.dll")] private static extern int DwmEnableBlurBehindWindow(nint hwnd, in BlurBehind blur);
+    [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
+
+    /// <summary>
+    /// Turns a borderless WinUI window into a per-pixel transparent popup: no DWM frame, border, corner
+    /// clip or shadow (those caused the bright 1 px outline), host-backdrop brushes allowed, and an empty
+    /// blur-behind region so DWM composes the client area with alpha.
+    /// </summary>
+    internal static void MakeTransparent(Window window)
+    {
+        var hwnd = Handle(window);
+        const int styleIndex = -16;
+        var style = GetWindowLongPtr(hwnd, styleIndex).ToInt64();
+        style &= ~(0x00C00000L | 0x00040000L | 0x00080000L | 0x00800000L | 0x00400000L);
+        style |= 0x80000000L;
+        SetWindowLongPtr(hwnd, styleIndex, (nint)style);
+        var results = new List<int>
+        {
+            DwmSetWindowAttribute(hwnd, 2, 2, sizeof(int)),
+            DwmSetWindowAttribute(hwnd, 33, 1, sizeof(int)),
+            DwmSetWindowAttribute(hwnd, 34, unchecked((int)0xFFFFFFFE), sizeof(int)),
+            DwmSetWindowAttribute(hwnd, 17, 1, sizeof(int))
+        };
+        var region = CreateRectRgn(-2, -2, -1, -1);
+        results.Add(DwmEnableBlurBehindWindow(hwnd, new BlurBehind { Flags = 3, Enable = 1, Region = region }));
+        DeleteObject(region);
+        SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+        Diagnostics.Log($"MakeTransparent '{window.Title}' style=0x{style:X} hr=[{string.Join(",", results.Select(r => $"0x{r:X8}"))}]");
+    }
+
+    internal static void StyleFloat(Window window, bool dark)
     {
         const int useImmersiveDarkMode = 20;
         const int borderColor = 34;
         var hwnd = Handle(window);
         DwmSetWindowAttribute(hwnd, useImmersiveDarkMode, dark ? 1 : 0, sizeof(int));
-        DwmSetWindowAttribute(hwnd, borderColor, border.R | (border.G << 8) | (border.B << 16), sizeof(int));
+        DwmSetWindowAttribute(hwnd, borderColor, unchecked((int)0xFFFFFFFE), sizeof(int));
     }
 
-    internal static void Place(Window window, nint monitor, int width, int height, double anchorX, double anchorY)
+    /// <summary>
+    /// Positions a window on a monitor's work area. <paramref name="glass"/> is the transparent shadow margin
+    /// (DIPs) of glass windows: the visible panel, not the HWND, keeps the 16 px distance from the edge.
+    /// </summary>
+    internal static void Place(Window window, nint monitor, int width, int height, double anchorX, double anchorY, double glass = 0)
     {
         var work = GetMonitor(monitor).Work;
         var hwnd = Handle(window);
         if (MonitorFromWindow(hwnd, 2) != monitor)
             SetWindowPos(hwnd, 0, work.Left + work.Width / 2, work.Top + work.Height / 2, 1, 1, NoActivate | 0x0004);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96.0;
-        var w = Math.Min(work.Width, (int)Math.Round(width * scale));
-        var h = Math.Min(work.Height, (int)Math.Round(height * scale));
-        var padding = (int)Math.Round(16 * scale);
-        var x = work.Left + Math.Max(0, (int)Math.Round((work.Width - w - padding * 2) * anchorX) + padding);
-        var y = work.Top + Math.Max(0, (int)Math.Round((work.Height - h - padding * 2) * anchorY) + padding);
+        var margin = (int)Math.Round(glass * scale);
+        var w = Math.Min(work.Width + margin * 2, (int)Math.Round(width * scale));
+        var h = Math.Min(work.Height + margin * 2, (int)Math.Round(height * scale));
+        var padding = (int)Math.Round(16 * scale) - margin;
+        var x = work.Left + (int)Math.Round((work.Width - w - padding * 2) * anchorX) + padding;
+        var y = work.Top + (int)Math.Round((work.Height - h - padding * 2) * anchorY) + padding;
         window.AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
     }
 
-    internal static void PlacePopup(Window window, Rect anchor, int width, int height)
+    /// <summary>
+    /// Places a popup next to an anchor (physical pixels), preferring above it and right-aligned, clamped to
+    /// the work area. Returns true when the popup opened above the anchor (used for the slide direction).
+    /// </summary>
+    internal static bool PlacePopup(Window window, Rect anchor, int width, int height, double glass = 0, bool alignLeft = false)
     {
         var center = new Point { X = anchor.Left + anchor.Width / 2, Y = anchor.Top + anchor.Height / 2 };
         var monitor = MonitorFromPoint(center, 2);
@@ -162,14 +224,34 @@ internal static class NativeWindow
         if (MonitorFromWindow(hwnd, 2) != monitor)
             SetWindowPos(hwnd, 0, center.X, center.Y, 1, 1, NoActivate | 0x0004);
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96.0;
+        var margin = (int)Math.Round(glass * scale);
         var gap = (int)Math.Round(8 * scale);
-        var w = Math.Min((int)Math.Round(width * scale), work.Width - 2 * gap);
-        var h = Math.Min((int)Math.Round(height * scale), work.Height - 2 * gap);
-        var x = Math.Clamp(anchor.Right - w, work.Left + gap, work.Right - w - gap);
-        var above = anchor.Top - h - gap;
+        var w = Math.Min((int)Math.Round(width * scale), work.Width - 2 * gap + 2 * margin);
+        var h = Math.Min((int)Math.Round(height * scale), work.Height - 2 * gap + 2 * margin);
+        var panelW = w - 2 * margin;
+        var panelH = h - 2 * margin;
+        var panelX = Math.Clamp(alignLeft ? anchor.Left : anchor.Right - panelW, work.Left + gap, work.Right - panelW - gap);
+        var above = anchor.Top - panelH - gap;
         var below = anchor.Bottom + gap;
-        var y = Math.Clamp(above >= work.Top + gap ? above : below, work.Top + gap, work.Bottom - h - gap);
-        window.AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
+        var opensAbove = above >= work.Top + gap;
+        var panelY = Math.Clamp(opensAbove ? above : below, work.Top + gap, work.Bottom - panelH - gap);
+        window.AppWindow.MoveAndResize(new RectInt32(panelX - margin, panelY - margin, w, h));
+        return opensAbove;
+    }
+
+    /// <summary>Screen rectangle (physical pixels) of an element inside a window.</summary>
+    internal static Rect ScreenRect(Window window, FrameworkElement element)
+    {
+        var scale = Math.Max(96, GetDpiForWindow(Handle(window))) / 96.0;
+        var origin = element.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0));
+        var position = window.AppWindow.Position;
+        var left = position.X + (int)Math.Round(origin.X * scale);
+        var top = position.Y + (int)Math.Round(origin.Y * scale);
+        return new Rect
+        {
+            Left = left, Top = top,
+            Right = left + (int)Math.Round(element.ActualWidth * scale), Bottom = top + (int)Math.Round(element.ActualHeight * scale)
+        };
     }
 
     internal sealed record Target(nint Handle, Rect Bounds, string Title);

@@ -2,6 +2,8 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using System.Numerics;
 using Windows.System;
 using static RealCaptureX.CaptureMenu;
 
@@ -9,137 +11,205 @@ namespace RealCaptureX;
 
 internal sealed class ToolbarWindow : Window
 {
-    internal const int DockWidth = 501;
-    internal const int DockHeight = 106;
+    internal const int PanelWidth = 612;
+    internal const int PanelHeight = 134;
 
-    private readonly Border frame;
+    private readonly GlassSurface glass;
     private readonly TextBlock status = Appearance.Label("", 11, Appearance.Muted);
     private readonly Button[] captureButtons = new Button[3];
     private readonly string[] labels = ["Capture region", "Capture window", "Capture display"];
+    private readonly List<Button> tiles = [];
+    private readonly Border indicator;
+    private readonly Grid modes;
+    private readonly Button pin;
+    private Button selected = null!;
+    private bool pinned;
     private string? defaultStatus;
     private int revision;
 
-    public ToolbarWindow(Action<CaptureCommand> execute, Action hide, Action<NativeWindow.Rect> context)
+    public ToolbarWindow(Action<CaptureCommand> execute, Action hide, Action<NativeWindow.Rect, bool> context)
     {
         Title = "REAL Capture X";
         NativeWindow.ToolWindow(this);
+        NativeWindow.ExcludeOverlayFromCapture(this);
         var shell = new Grid();
-        shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(35) });
+        shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
         shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
         shell.RowDefinitions.Add(new RowDefinition());
-        frame = Appearance.Frame(shell);
 
-        var header = new Grid { Padding = new Thickness(8, 2, 5, 2), ColumnSpacing = 8 };
+        var header = new Grid { Padding = new Thickness(14, 0, 10, 0), ColumnSpacing = 10 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
-        brand.Children.Add(Appearance.Mark(24));
-        brand.Children.Add(Appearance.Label("REAL Capture X", 12, strong: true));
+        var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 11 };
+        brand.Children.Add(Appearance.Mark(30));
+        brand.Children.Add(Appearance.Label("REAL Capture X", 15, strong: true));
         header.Children.Add(brand);
         status.TextTrimming = TextTrimming.CharacterEllipsis;
+        status.HorizontalAlignment = HorizontalAlignment.Right;
+        status.Margin = new Thickness(0, 0, 6, 0);
         AutomationProperties.SetLiveSetting(status, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         Grid.SetColumn(status, 1);
         header.Children.Add(status);
 
         var utility = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
-        utility.Children.Add(Appearance.IconButton(Glyph.History, "Capture history", () => execute(CaptureCommand.History), 27));
-        utility.Children.Add(Appearance.IconButton(Glyph.Settings, "Settings", () => execute(CaptureCommand.Settings), 27));
-        var more = Appearance.IconButton(Glyph.More, "More capture modes", size: 27);
-        more.Flyout = CaptureMenu.Flyout(
-            new("Capture",
-                Mode(CaptureCommand.RepeatRegion, "Repeat last region", Glyph.Repeat, execute),
-                Mode(CaptureCommand.ScrollHorizontal, "Horizontal scrolling", Glyph.HorizontalScroll, execute),
-                Mode(CaptureCommand.Text, "Capture text (OCR)", Glyph.Scan, execute)),
-            new("Workspace",
-                Mode(CaptureCommand.Recent, "Quick Access", Glyph.Image, execute),
-                Mode(CaptureCommand.OpenStudio, "Open video in Studio", Glyph.Studio, execute)));
-        utility.Children.Add(more);
-        utility.Children.Add(Appearance.IconButton(Glyph.Close, "Hide toolbar", hide, 27));
+        pin = Appearance.IconButton(Glyph.Pin, "Keep toolbar above workspace", TogglePin, 32);
+        utility.Children.Add(pin);
+        utility.Children.Add(Appearance.IconButton(Glyph.History, "Capture history", () => execute(CaptureCommand.History), 32));
+        var split = Appearance.Divider();
+        split.Height = 16;
+        utility.Children.Add(split);
+        utility.Children.Add(Appearance.IconButton(Glyph.Settings, "Settings", () => execute(CaptureCommand.Settings), 32));
+        utility.Children.Add(Appearance.IconButton(Glyph.More, "Quick menu", () => OpenMenu(compact: true), 32));
+        utility.Children.Add(Appearance.IconButton(Glyph.Close, "Hide toolbar", hide, 32));
         Grid.SetColumn(utility, 2);
         header.Children.Add(utility);
         shell.Children.Add(header);
         var rule = Appearance.Rule();
+        rule.Margin = new Thickness(1, 0, 1, 0);
         Grid.SetRow(rule, 1);
         shell.Children.Add(rule);
 
-        var modes = new Grid { ColumnSpacing = 3, Padding = new Thickness(6, 5, 6, 6) };
+        modes = new Grid { Padding = new Thickness(10, 8, 10, 10) };
         for (var i = 0; i < 7; i++)
-            modes.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 3 ? new GridLength(13) : new GridLength(1, GridUnitType.Star) });
+            modes.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = i == 3 ? new GridLength(13) : new GridLength(1, GridUnitType.Star)
+            });
+        indicator = new Border
+        {
+            CornerRadius = new CornerRadius(12), Background = Appearance.SelectedFill, BorderBrush = Appearance.SelectedRim,
+            BorderThickness = new Thickness(1), IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        Grid.SetColumnSpan(indicator, 7);
+        modes.Children.Add(indicator);
+
         captureButtons[0] = Tile("Region", Glyph.Region, CaptureCommand.Region);
         captureButtons[1] = Tile("Window", Glyph.Window, CaptureCommand.Window);
         captureButtons[2] = Tile("Display", Glyph.Display, CaptureCommand.Display);
-        Appearance.SetTone(captureButtons[0], ButtonTone.Selected);
         for (var i = 0; i < captureButtons.Length; i++) AddTile(captureButtons[i], i);
         var divider = Appearance.Divider();
+        divider.Height = 34;
+        divider.Margin = new Thickness(0);
         divider.HorizontalAlignment = HorizontalAlignment.Center;
         Grid.SetColumn(divider, 3);
         modes.Children.Add(divider);
         AddTile(Tile("Scroll", Glyph.Scroll, CaptureCommand.Scroll), 4);
         AddTile(Tile("Text", Glyph.Scan, CaptureCommand.Text), 5);
         var record = Tile("Record", Glyph.Video);
-        record.Flyout = CaptureMenu.Flyout(new MenuSection("Recording",
-            Mode(CaptureCommand.RecordRegion, "Record region", Glyph.Region, execute),
-            Mode(CaptureCommand.RecordDisplay, "Record display", Glyph.Display, execute)));
+        record.Click += (_, _) => TrayMenuWindow.Shared?.ShowMenu(NativeWindow.ScreenRect(this, record), null,
+            [new MenuSection("Record",
+                Mode(CaptureCommand.RecordRegion, "Record region", Glyph.Region, execute),
+                Mode(CaptureCommand.RecordDisplay, "Record display", Glyph.Display, execute))], 236);
         AddTile(record, 6);
+        selected = captureButtons[0];
+        modes.PointerExited += (_, _) => Slide(selected);
+        modes.SizeChanged += (_, _) => Slide(selected, animate: false);
         Grid.SetRow(modes, 2);
         shell.Children.Add(modes);
-        frame.KeyDown += (_, e) =>
+
+        glass = Appearance.Float(this, shell, radius: 16);
+        glass.Panel.KeyDown += (_, e) =>
         {
             if (e.Key != VirtualKey.Escape) return;
             e.Handled = true;
             hide();
         };
-        frame.RightTapped += (_, e) =>
+        glass.Panel.RightTapped += (_, e) =>
+        {
+            OpenMenu(compact: false);
+            e.Handled = true;
+        };
+
+        void OpenMenu(bool compact)
         {
             var position = AppWindow.Position;
             var size = AppWindow.Size;
+            var inset = (int)Math.Round(GlassSurface.Margin * Scale());
             context(new NativeWindow.Rect
             {
-                Left = position.X, Right = position.X + size.Width, Top = position.Y, Bottom = position.Y + size.Height
-            });
-            e.Handled = true;
-        };
-        Appearance.SetContent(this, frame, floating: true);
+                Left = position.X + inset, Right = position.X + size.Width - inset,
+                Top = position.Y + inset, Bottom = position.Y + size.Height - inset
+            }, compact);
+        }
 
         Button Tile(string label, Glyph glyph, CaptureCommand? command = null)
         {
-            Action? start = command is { } mode ? () => execute(mode) : null;
-            var button = Appearance.Action(label, start);
-            button.HorizontalAlignment = HorizontalAlignment.Stretch;
-            button.VerticalAlignment = VerticalAlignment.Stretch;
-            button.Height = double.NaN;
-            button.Padding = new Thickness(0);
-            var contents = new StackPanel { Spacing = 4 };
-            contents.Children.Add(Symbols.Draw(glyph, 21, glyph == Glyph.Region ? Appearance.AccentText : Appearance.Text));
-            var text = Appearance.Label(label, 11, glyph == Glyph.Region ? Appearance.AccentText : Appearance.Text, strong: true);
+            var button = new Button
+            {
+                Style = (Style)Application.Current.Resources["TileButton"], Background = Appearance.Clear,
+                BorderThickness = new Thickness(0), Foreground = Appearance.Text,
+                HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center, Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(12)
+            };
+            AutomationProperties.SetName(button, label);
+            ToolTipService.SetToolTip(button, label);
+            var contents = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            contents.Children.Add(Symbols.Draw(glyph, 26));
+            var text = Appearance.Label(label, 13);
             text.HorizontalAlignment = HorizontalAlignment.Center;
             contents.Children.Add(text);
             button.Content = contents;
+            if (command is { } mode)
+                button.Click += (_, _) =>
+                {
+                    selected = button;
+                    Slide(button, animate: false);
+                    execute(mode);
+                };
+            button.PointerEntered += (_, _) => Slide(button);
+            button.GotFocus += (_, _) => Slide(button);
+            button.LostFocus += (_, _) => Slide(selected);
             return button;
         }
 
         void AddTile(Button tile, int column)
         {
             Grid.SetColumn(tile, column);
+            tiles.Add(tile);
             modes.Children.Add(tile);
         }
+    }
+
+    private double Scale() => Math.Max(96, NativeWindow.GetDpiForWindow(NativeWindow.Handle(this))) / 96.0;
+
+    /// <summary>Moves the shared highlight pill to a tile; a spring keeps hover → hover travel fluid.</summary>
+    private void Slide(Button tile, bool animate = true)
+    {
+        if (tile.ActualWidth <= 0) return;
+        indicator.Width = tile.ActualWidth;
+        var offset = tile.TransformToVisual(modes).TransformPoint(new Windows.Foundation.Point(0, 0));
+        ProductMotion.MoveTo(indicator, new Vector2((float)offset.X - (float)modes.Padding.Left, 0), animate);
+    }
+
+    private void TogglePin()
+    {
+        pinned = !pinned;
+        ((OverlappedPresenter)AppWindow.Presenter).IsAlwaysOnTop = pinned;
+        Appearance.SetTone(pin, pinned ? ButtonTone.Selected : ButtonTone.Quiet);
+        AutomationProperties.SetItemStatus(pin, pinned ? "Pinned" : "");
+        ToolTipService.SetToolTip(pin, pinned ? "Release toolbar from top" : "Keep toolbar above workspace");
     }
 
     public void Show()
     {
         revision++;
         var visible = AppWindow.IsVisible;
-        frame.IsHitTestVisible = true;
+        glass.Panel.IsHitTestVisible = true;
         ((OverlappedPresenter)AppWindow.Presenter).IsAlwaysOnTop = true;
-        NativeWindow.Place(this, NativeWindow.CursorMonitor(), DockWidth, DockHeight, .5, .86);
-        ProductMotion.Enter(frame, !visible);
+        NativeWindow.Place(this, NativeWindow.CursorMonitor(), GlassSurface.Outer(PanelWidth),
+            GlassSurface.Outer(PanelHeight), .5, .88, GlassSurface.Margin);
         Activate();
+        Slide(selected, animate: false);
+        if (!visible) glass.Enter(rise: 10);
+        else glass.Settle();
     }
 
     public void YieldToWorkspace()
     {
-        if (AppWindow.IsVisible) ((OverlappedPresenter)AppWindow.Presenter).IsAlwaysOnTop = false;
+        if (!pinned && AppWindow.IsVisible) ((OverlappedPresenter)AppWindow.Presenter).IsAlwaysOnTop = false;
     }
 
     public void HideNow()
@@ -152,8 +222,8 @@ internal sealed class ToolbarWindow : Window
     {
         if (!AppWindow.IsVisible) return;
         var current = ++revision;
-        frame.IsHitTestVisible = false;
-        await ProductMotion.ExitAsync(frame);
+        glass.Panel.IsHitTestVisible = false;
+        await glass.ExitAsync(drop: 6);
         if (current == revision) HideNow();
     }
 

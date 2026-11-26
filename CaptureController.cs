@@ -30,7 +30,7 @@ internal sealed class CaptureController
     public CaptureController()
     {
         tray = new TrayMenuWindow(Queue);
-        toolbar = new ToolbarWindow(Queue, HideToolbar, ShowTrayMenu);
+        toolbar = new ToolbarWindow(Queue, HideToolbar, ShowCommandMenu);
         quick = new QuickAccessWindow(OpenAsync, CopyAsync, SaveAsync, PinAsync, RecognizeAsync,
             delta => _ = BrowseOverlayAsync(delta), DismissOverlay);
         toolbar.AppWindow.Closing += (_, e) =>
@@ -49,6 +49,7 @@ internal sealed class CaptureController
         try
         {
             settings = store.ReadSettings();
+            Appearance.SetPreferences(settings.Translucency, settings.ReduceMotion);
             Appearance.SetTheme(settings.Theme);
             captures = store.ReadAll();
             shell = new ShellIntegration(NativeWindow.Handle(toolbar), Queue, ShowTrayMenu, settings.KeyBindings);
@@ -66,9 +67,11 @@ internal sealed class CaptureController
     private void Queue(CaptureCommand command) =>
         toolbar.DispatcherQueue.TryEnqueue(async () => await ExecuteAsync(command));
 
-    private void ShowTrayMenu(NativeWindow.Rect anchor) => toolbar.DispatcherQueue.TryEnqueue(() =>
+    private void ShowTrayMenu(NativeWindow.Rect anchor) => ShowCommandMenu(anchor, false);
+
+    private void ShowCommandMenu(NativeWindow.Rect anchor, bool compact) => toolbar.DispatcherQueue.TryEnqueue(() =>
     {
-        if (!capturing && !exiting) tray.Show(anchor, settings.KeyBindings);
+        if (!capturing && !exiting) tray.Show(anchor, settings.KeyBindings, compact);
     });
 
     private async Task ExecuteAsync(CaptureCommand command)
@@ -121,6 +124,7 @@ internal sealed class CaptureController
             var bounds = NativeWindow.GetMonitor(monitor).Bounds;
             toolbar.HideNow();
             quick.HideNow();
+            ToastWindow.HideNow();
             await Task.Run(NativeWindow.DwmFlush);
             if (command == CaptureCommand.RecordDisplay)
             {
@@ -187,8 +191,9 @@ internal sealed class CaptureController
                 using var bytes = new MemoryStream();
                 await read.CopyToAsync(bytes);
                 var recognized = await TextRecognition.CopyAsync(bytes.ToArray());
-                if (recognized.Length == 0) ShowToolbar("No text detected");
-                else if (wasVisible) ShowToolbar("Text copied to clipboard");
+                if (wasVisible) ShowToolbar();
+                if (recognized.Length == 0) ToastWindow.Show("No text detected", "Try a larger or sharper area.", Glyph.Scan);
+                else ToastWindow.Show("Text copied", $"{recognized.Length:N0} characters are in your clipboard.", Glyph.Scan);
                 return;
             }
 
@@ -197,8 +202,16 @@ internal sealed class CaptureController
             overlayIndex = 0;
             overlayMonitor = monitor;
             if (settings.ShowPreview) await ShowOverlayAsync(animate: true);
-            if (settings.AutoCopy) await CopyAsync(entry);
-            if (!settings.ShowPreview && wasVisible) ShowToolbar("Capture saved to history");
+            if (settings.AutoCopy)
+            {
+                await CopyAsync(entry);
+                ToastWindow.Show("Screenshot copied", "Image is in your clipboard.");
+            }
+            if (!settings.ShowPreview)
+            {
+                if (wasVisible) ShowToolbar();
+                if (!settings.AutoCopy) ToastWindow.Show("Screenshot saved", "Find it in Capture history.", Glyph.Image);
+            }
         }
         finally
         {
@@ -352,7 +365,7 @@ internal sealed class CaptureController
             DefaultFileExtension = ".png"
         };
 #if DEBUG
-        if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") == "1")
+        if (QaMode.Profile)
         {
             picker.SuggestedFolder = Path.Combine(CaptureStore.Root, "Exports");
             Directory.CreateDirectory(picker.SuggestedFolder);
@@ -378,6 +391,7 @@ internal sealed class CaptureController
             try { store.SaveSettings(updated); }
             catch { shell?.ChangeShortcuts(settings.KeyBindings); throw; }
             settings = updated;
+            Appearance.SetPreferences(settings.Translucency, settings.ReduceMotion);
             Appearance.SetTheme(settings.Theme);
             toolbar.SetShortcuts(settings.KeyBindings, shell?.UnavailableShortcuts);
         });

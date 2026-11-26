@@ -10,7 +10,8 @@ internal sealed record CaptureEntry(string Path, DateTimeOffset Created, string 
 }
 
 internal sealed record CaptureSettings(int Corner = 0, int Timeout = 12, bool ShowPreview = true, bool AutoCopy = false,
-    bool IncludePointer = false, string[]? Shortcuts = null, ProductTheme Theme = ProductTheme.System)
+    bool IncludePointer = false, string[]? Shortcuts = null, ProductTheme Theme = ProductTheme.System,
+    bool Translucency = true, bool ReduceMotion = false)
 {
     internal string[] KeyBindings => Shortcuts ?? CaptureShortcut.Defaults();
 }
@@ -25,7 +26,7 @@ internal sealed class CaptureStore
     private static string GetRoot()
     {
 #if DEBUG
-        if (Environment.GetEnvironmentVariable("REAL_CAPTURE_X_INSPECT") == "1")
+        if (QaMode.Profile)
             return Path.Combine(Path.GetTempPath(), "REAL Capture X QA");
 #endif
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "REAL Capture X");

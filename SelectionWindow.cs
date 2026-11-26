@@ -1,5 +1,8 @@
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Input;
+using System.Numerics;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -24,17 +27,25 @@ internal sealed class SelectionWindow : Window
     private readonly Grid surface;
     private readonly Canvas canvas = new() { IsHitTestVisible = false };
     private readonly Rectangle[] shade = new Rectangle[4];
-    private readonly Rectangle edgeShadow = new() { Stroke = Appearance.Brush(0, 0, 0, 166), StrokeThickness = 3, IsHitTestVisible = false };
-    private readonly Rectangle outline = new() { Stroke = Appearance.Accent, StrokeThickness = 1.5, IsHitTestVisible = false };
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush Ink = Appearance.Brush(255, 255, 255);
+    private readonly Rectangle edgeShadow = new() { Stroke = Appearance.Brush(0, 0, 0, 120), StrokeThickness = 3, IsHitTestVisible = false };
+    private readonly Rectangle outline = new() { Stroke = Ink, StrokeThickness = 1, IsHitTestVisible = false };
     private readonly Rectangle horizontalGuide = Guide();
     private readonly Rectangle verticalGuide = Guide();
     private readonly Rectangle[] corners = Enumerable.Range(0, 8)
-        .Select(_ => new Rectangle { Fill = Appearance.Accent, IsHitTestVisible = false }).ToArray();
+        .Select(_ => new Rectangle { Fill = Ink, IsHitTestVisible = false, RadiusX = 1, RadiusY = 1 }).ToArray();
 
     private static Rectangle Guide() =>
-        new() { Fill = Appearance.Brush(249, 246, 235, 70), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+        new() { Fill = Appearance.Brush(255, 255, 255, 64), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     private readonly Border badge;
-    private readonly TextBlock dimensions = Appearance.Label("", 13);
+    private readonly TextBlock dimensions = Appearance.Label("", 12, Ink, strong: true);
+    private readonly CanvasControl loupe = new() { Width = 124, Height = 124, IsHitTestVisible = false };
+    private readonly Border loupeFrame;
+    private readonly TextBlock loupeLabel = Appearance.Label("", 11, Ink, strong: true);
+    private CanvasBitmap? pixels;
+    private Windows.Foundation.Point pointer;
+    private RectInt32 shown;
+    private long tween;
     private readonly Image image = new() { Stretch = Microsoft.UI.Xaml.Media.Stretch.Fill, IsHitTestVisible = false };
     private NativeWindow.Point? start;
     private RectInt32 area;
@@ -56,7 +67,7 @@ internal sealed class SelectionWindow : Window
         surface.Children.Add(canvas);
         for (var i = 0; i < shade.Length; i++)
         {
-            shade[i] = new Rectangle { Fill = Appearance.Brush(13, 12, 15, 151), IsHitTestVisible = false };
+            shade[i] = new Rectangle { Fill = Appearance.Brush(8, 8, 10, 120), IsHitTestVisible = false };
             canvas.Children.Add(shade[i]);
         }
         canvas.Children.Add(horizontalGuide);
@@ -64,20 +75,41 @@ internal sealed class SelectionWindow : Window
         canvas.Children.Add(edgeShadow);
         canvas.Children.Add(outline);
         foreach (var corner in corners) canvas.Children.Add(corner);
+        loupe.Draw += DrawLoupe;
+        var loupeBody = new StackPanel { Spacing = 0 };
+        loupeBody.Children.Add(new Border { Width = 124, Height = 124, CornerRadius = new CornerRadius(62), Child = loupe });
+        loupeLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        loupeLabel.Margin = new Thickness(0, 6, 0, 0);
+        loupeBody.Children.Add(new Border
+        {
+            Child = loupeLabel, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(7, 2, 7, 3), Margin = new Thickness(0, 6, 0, 0), Background = Appearance.Brush(16, 16, 18, 225)
+        });
+        loupeFrame = new Border { Child = loupeBody, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+        canvas.Children.Add(loupeFrame);
         badge = MakeBadge(dimensions);
         badge.Visibility = Visibility.Collapsed;
         badge.Padding = new Thickness(8, 4, 8, 4);
         canvas.Children.Add(badge);
         var hints = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        hints.Children.Add(Symbols.Draw(windows is null ? Glyph.Region : Glyph.Window, 17, Appearance.AccentText));
-        hints.Children.Add(Appearance.Label(windows is null ? "Drag to capture a region" : "Click a window to capture", 12, strong: true));
-        hints.Children.Add(Appearance.Divider());
+        var soft = Appearance.Brush(255, 255, 255, 150);
+        hints.Children.Add(Symbols.Draw(windows is null ? Glyph.Region : Glyph.Window, 17, Ink));
+        hints.Children.Add(Appearance.Label(windows is null ? "Drag to capture a region" : "Click a window to capture", 12, Ink, strong: true));
+        hints.Children.Add(new Border { Width = 1, Height = 16, Background = Appearance.Brush(255, 255, 255, 40), Margin = new Thickness(4, 0, 4, 0) });
         if (windows is null)
         {
-            hints.Children.Add(Appearance.Key("Shift"));
-            hints.Children.Add(Appearance.Label("Square", 11, Appearance.Muted));
+            hints.Children.Add(Cap("Shift"));
+            hints.Children.Add(Appearance.Label("Square", 11, soft));
         }
-        hints.Children.Add(Appearance.Key("Esc"));
+        hints.Children.Add(Cap("Esc"));
+        hints.Children.Add(Appearance.Label("Cancel", 11, soft));
+
+        Border Cap(string key) => new()
+        {
+            Child = Appearance.Label(key, 11, Ink), Padding = new Thickness(6, 1, 6, 2), CornerRadius = new CornerRadius(5),
+            Background = Appearance.Brush(255, 255, 255, 26), BorderBrush = Appearance.Brush(255, 255, 255, 36),
+            BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center
+        };
         var instruction = MakeBadge(hints);
         instruction.HorizontalAlignment = HorizontalAlignment.Center;
         instruction.VerticalAlignment = VerticalAlignment.Top;
@@ -107,15 +139,64 @@ internal sealed class SelectionWindow : Window
                 Finish(null);
             }
         };
-        Closed += (_, _) => result.TrySetResult(null);
+        Closed += (_, _) =>
+        {
+            tween++;
+            result.TrySetResult(null);
+            loupe.RemoveFromVisualTree();
+            pixels?.Dispose();
+            pixels = null;
+        };
     }
 
     private static Border MakeBadge(FrameworkElement content) => new()
     {
-        Child = content, CornerRadius = new CornerRadius(11), Padding = new Thickness(10, 7, 10, 7),
-        Background = Appearance.Surface, BorderBrush = Appearance.Line, BorderThickness = new Thickness(1),
-        IsHitTestVisible = false, MaxWidth = 400
+        Child = content, CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 7, 10, 7),
+        Background = Appearance.Brush(18, 18, 20, 228), BorderBrush = Appearance.Brush(255, 255, 255, 30),
+        BorderThickness = new Thickness(1), IsHitTestVisible = false, MaxWidth = 420, RequestedTheme = ElementTheme.Dark
     };
+
+    private void DrawLoupe(CanvasControl sender, CanvasDrawEventArgs args)
+    {
+        if (pixels is null) return;
+        const float zoom = 9;
+        var ds = args.DrawingSession;
+        var px = ToPixel(pointer);
+        var size = (float)sender.ActualWidth;
+        var span = size / zoom;
+        var source = new Windows.Foundation.Rect(px.X + .5 - span / 2, px.Y + .5 - span / 2, span, span);
+        ds.Clear(Microsoft.UI.Colors.Black);
+        ds.DrawImage(pixels, new Windows.Foundation.Rect(0, 0, size, size), source, 1, CanvasImageInterpolation.NearestNeighbor);
+        var cell = new Windows.Foundation.Rect(size / 2 - zoom / 2, size / 2 - zoom / 2, zoom, zoom);
+        ds.DrawRectangle(cell, Microsoft.UI.Colors.Black, 2.5f);
+        ds.DrawRectangle(cell, Microsoft.UI.Colors.White, 1);
+        ds.DrawCircle(new Vector2(size / 2), size / 2 - 1, Windows.UI.Color.FromArgb(200, 255, 255, 255), 2);
+    }
+
+    private void UpdateLoupe(Windows.Foundation.Point position, bool visible)
+    {
+        pointer = position;
+        loupeFrame.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible) return;
+        var px = ToPixel(position);
+        var color = PixelAt(px.X, px.Y);
+        loupeLabel.Text = $"{px.X}, {px.Y}   #{color.R:X2}{color.G:X2}{color.B:X2}";
+        var x = position.X + 22;
+        var y = position.Y + 22;
+        if (x + 140 > canvas.ActualWidth) x = position.X - 146;
+        if (y + 160 > canvas.ActualHeight) y = position.Y - 172;
+        Canvas.SetLeft(loupeFrame, x);
+        Canvas.SetTop(loupeFrame, y);
+        loupe.Invalidate();
+    }
+
+    private Windows.UI.Color PixelAt(int x, int y)
+    {
+        x = Math.Clamp(x, 0, frame.Width - 1);
+        y = Math.Clamp(y, 0, frame.Height - 1);
+        var i = (y * frame.Width + x) * 4;
+        return Windows.UI.Color.FromArgb(255, frame.Bgra[i + 2], frame.Bgra[i + 1], frame.Bgra[i]);
+    }
 
     public Task<Selection?> PickAsync()
     {
@@ -124,6 +205,9 @@ internal sealed class SelectionWindow : Window
             stream.Write(frame.Bgra);
         source.Invalidate();
         image.Source = source;
+        pixels = CanvasBitmap.CreateFromBytes(CanvasDevice.GetSharedDevice(), frame.Bgra, frame.Width, frame.Height,
+            Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized, 96);
+        ProductMotion.Hide(canvas);
         var hwnd = Handle(this);
         AppWindow.MoveAndResize(new RectInt32(display.Left, display.Top, display.Width, display.Height));
         AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
@@ -131,6 +215,7 @@ internal sealed class SelectionWindow : Window
         SetWindowPos(hwnd, Topmost, 0, 0, 0, 0, NoActivate | 0x0003);
         SetForegroundWindow(hwnd);
         surface.Focus(FocusState.Programmatic);
+        ProductMotion.Opacity(canvas, 1, TimeSpan.FromMilliseconds(160));
         return result.Task;
     }
 
@@ -142,6 +227,7 @@ internal sealed class SelectionWindow : Window
             UpdateWindow();
             return;
         }
+        UpdateLoupe(position, true);
         if (start is not { } origin)
         {
             horizontalGuide.Visibility = verticalGuide.Visibility = Visibility.Visible;
@@ -210,7 +296,32 @@ internal sealed class SelectionWindow : Window
             area = new RectInt32(left * frame.Width / display.Width, top * frame.Height / display.Height,
                 (right - left) * frame.Width / display.Width, (bottom - top) * frame.Height / display.Height);
         }
-        UpdateMask(area);
+        Glide(area);
+    }
+
+    /// <summary>Eases the window highlight to a new rectangle over ~140 ms on the render loop.</summary>
+    private void Glide(RectInt32 target)
+    {
+        if (target.Equals(shown)) return;
+        var from = shown;
+        shown = target;
+        if (!ProductMotion.Enabled || from.Width == 0 || target.Width == 0)
+        {
+            UpdateMask(target);
+            return;
+        }
+        var id = ++tween;
+        var started = DateTime.UtcNow;
+        void Tick(object? sender, object args)
+        {
+            if (id != tween) { Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Tick; return; }
+            var t = Math.Clamp((DateTime.UtcNow - started).TotalMilliseconds / 140, 0, 1);
+            var e = 1 - Math.Pow(1 - t, 3);
+            int Lerp(int a, int b) => (int)Math.Round(a + (b - a) * e);
+            UpdateMask(new RectInt32(Lerp(from.X, target.X), Lerp(from.Y, target.Y), Lerp(from.Width, target.Width), Lerp(from.Height, target.Height)));
+            if (t >= 1) Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Tick;
+        }
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += Tick;
     }
 
     private NativeWindow.Point ToPixel(Point point) => new()
@@ -234,20 +345,21 @@ internal sealed class SelectionWindow : Window
         var visible = width > 0 && height > 0;
         Place(edgeShadow, x, y, width, height);
         Place(outline, x, y, width, height);
-        var tick = Math.Min(8, Math.Min(width, height) / 2);
+        var tick = Math.Min(14, Math.Min(width, height) / 2);
+        const double thick = 3;
         for (var index = 0; index < 4; index++)
         {
-            var cx = x + (index % 2 == 0 ? 0 : width - 2);
-            var cy = y + (index < 2 ? 0 : height - 2);
-            var visibility = tick >= 3 ? Visibility.Visible : Visibility.Collapsed;
+            var cx = x - 1 + (index % 2 == 0 ? 0 : width + 2 - thick);
+            var cy = y - 1 + (index < 2 ? 0 : height + 2 - thick);
+            var visibility = tick >= 4 ? Visibility.Visible : Visibility.Collapsed;
             corners[index * 2].Visibility = corners[index * 2 + 1].Visibility = visibility;
-            Place(corners[index * 2], cx + (index % 2 == 0 ? 0 : 2 - tick), cy, tick, 2);
-            Place(corners[index * 2 + 1], cx, cy + (index < 2 ? 0 : 2 - tick), 2, tick);
+            Place(corners[index * 2], cx + (index % 2 == 0 ? 0 : thick - tick), cy, tick, thick);
+            Place(corners[index * 2 + 1], cx, cy + (index < 2 ? 0 : thick - tick), thick, tick);
         }
 
         if (visible && badge.Visibility != Visibility.Visible) ProductMotion.Reveal(badge);
         badge.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        dimensions.Text = hovered?.Title ?? $"{rect.Width} × {rect.Height}";
+        dimensions.Text = hovered?.Title is { } name ? $"{name}   {rect.Width} × {rect.Height}" : $"{rect.Width} × {rect.Height}";
         dimensions.TextTrimming = TextTrimming.CharacterEllipsis;
         Canvas.SetLeft(badge, Math.Clamp(x + 2, 4, Math.Max(4, w - 190)));
         Canvas.SetTop(badge, y + height + 36 <= h ? y + height + 4 : Math.Max(0, y - 34));
