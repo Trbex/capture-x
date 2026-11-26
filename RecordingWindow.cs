@@ -12,7 +12,7 @@ namespace RealCaptureX;
 internal sealed class RecordingWindow : Window
 {
     private const int SetupWidth = 380;
-    private const int SetupHeight = 232;
+    private const int SetupHeight = 248;
     private const int CapsuleWidth = 268;
     private const int CapsuleHeight = 56;
     private readonly TaskCompletionSource<string?> result = new(TaskCreationOptions.RunContinuationsAsynchronously);
