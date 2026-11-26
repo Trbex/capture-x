@@ -3,9 +3,11 @@
 [![Latest release](https://img.shields.io/github/v/release/Trbex/capture-x?label=release&color=414449&labelColor=25272a)](https://github.com/Trbex/capture-x/releases/latest)
 [![Windows build status](https://img.shields.io/github/actions/workflow/status/Trbex/capture-x/build.yml?branch=main&label=Windows%20build&labelColor=25272a)](https://github.com/Trbex/capture-x/actions/workflows/build.yml)
 
-Press **Ctrl + Shift + 1**, draw a rectangle, and your screenshot appears in a small card at the edge of the screen. Copy it from there, pin it over another window, or open it in Annotate to mark the detail that matters. For a walkthrough, record the same area and trim the result in Studio.
+Press **Ctrl + Shift + 1** and draw a rectangle. Your screenshot appears in a card at the edge of the screen, ready to copy, pin or annotate. For a walkthrough, record a region and trim the clip in Studio.
 
-**[Download for Windows x64 ↗](https://github.com/Trbex/capture-x/releases/latest)** · [Installation](#installation) · [Keyboard shortcuts](#keyboard-shortcuts) · [Changelog](CHANGELOG.md)
+[![Download for Windows x64](docs/brand/download.svg)](https://github.com/Trbex/capture-x/releases/latest)
+
+[Installation](#installation) · [Keyboard shortcuts](#keyboard-shortcuts) · [Changelog](CHANGELOG.md)
 
 ## Capture
 
