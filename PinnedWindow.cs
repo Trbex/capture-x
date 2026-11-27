@@ -150,7 +150,8 @@ internal sealed class PinnedWindow : Window
     /// <summary>Projects the release velocity forward and springs the window to that resting place.</summary>
     private void Throw()
     {
-        var (vx, vy) = velocity.Velocity();
+        // With reduced motion there is no throw: the image stays where it was released (kept on screen).
+        var (vx, vy) = ProductMotion.Enabled ? velocity.Velocity() : (0, 0);
         var position = AppWindow.Position;
         var size = AppWindow.Size;
         var inset = Inset();

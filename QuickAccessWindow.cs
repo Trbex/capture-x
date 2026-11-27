@@ -272,7 +272,10 @@ internal sealed class QuickAccessWindow : Window
         AutomationProperties.SetHelpText(picture, $"{CaptureLabel.Of(capture.Mode)}, {capture.Width} × {capture.Height} px");
     }
 
-    /// <summary>Box-filtered downscale of the captured pixels on a worker thread (premultiplied BGRA, opaque).</summary>
+    /// <summary>
+    /// Box-filtered downscale of the captured pixels on a worker thread (premultiplied BGRA). Window captures keep
+    /// their alpha (rounded corners); display and region captures are forced opaque.
+    /// </summary>
     private static (int Width, int Height, byte[] Pixels) Thumbnail(CaptureFrame frame, int maxWidth, int maxHeight)
     {
         var factor = Math.Max(1, (int)Math.Ceiling(Math.Max(frame.Width / (double)maxWidth, frame.Height / (double)maxHeight)));
@@ -284,7 +287,8 @@ internal sealed class QuickAccessWindow : Window
             // Small captures are shown as they are; only the (ignored) alpha channel is forced opaque.
             var from = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(frame.Bgra.AsSpan());
             var to = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(output.AsSpan());
-            for (var i = 0; i < to.Length; i++) to[i] = from[i] | 0xFF000000;
+            var opaque = frame.HasAlpha ? 0u : 0xFF000000;
+            for (var i = 0; i < to.Length; i++) to[i] = from[i] | opaque;
             return (width, height, output);
         }
         var source = frame.Bgra;
@@ -292,7 +296,7 @@ internal sealed class QuickAccessWindow : Window
         for (var y = 0; y < height; y++)
             for (var x = 0; x < width; x++)
             {
-                int b = 0, g = 0, r = 0;
+                int b = 0, g = 0, r = 0, a = 0;
                 for (var dy = 0; dy < factor; dy++)
                 {
                     var row = ((y * factor + dy) * frame.Width + x * factor) * 4;
@@ -301,13 +305,14 @@ internal sealed class QuickAccessWindow : Window
                         b += source[row];
                         g += source[row + 1];
                         r += source[row + 2];
+                        a += source[row + 3];
                     }
                 }
                 var o = (y * width + x) * 4;
                 output[o] = (byte)(b / area);
                 output[o + 1] = (byte)(g / area);
                 output[o + 2] = (byte)(r / area);
-                output[o + 3] = 255;
+                output[o + 3] = frame.HasAlpha ? (byte)(a / area) : (byte)255;
             }
         return (width, height, output);
     }
@@ -339,7 +344,12 @@ internal sealed class QuickAccessWindow : Window
             NativeWindow.SetWindowPos(NativeWindow.Handle(this), NativeWindow.Topmost, 0, 0, 0, 0, NativeWindow.NoActivate | 0x0003);
         }
         AppWindow.Show(false);
-        if (animate && !visible)
+        if (!visible && !animate)
+        {
+            // Returning after a cancelled capture: back in place at once (the surface was concealed when hidden).
+            glass.Enter(animate: false);
+        }
+        else if (!visible)
         {
             // Emerges from the screen edge it lives on (the window margin sits just past that edge, so the card
             // is clipped there) and later leaves the same way.

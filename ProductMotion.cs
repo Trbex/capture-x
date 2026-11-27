@@ -376,7 +376,7 @@ internal static class ProductMotion
     /// Leaves along the path it came in: ease-in fade, motion on a fast spring that inherits any velocity it
     /// interrupts. Safe to interrupt with <see cref="Settle"/>.
     /// </summary>
-    internal static Task ExitAsync(FrameworkElement element, float toScale = .975f, float drop = 0, float slide = 0, Vector3? velocity = null)
+    internal static Task ExitAsync(FrameworkElement element, float toScale = .975f, float drop = 0, float slide = 0)
     {
         var visual = Prepare(element);
         if (!Enabled)
@@ -386,8 +386,7 @@ internal static class ProductMotion
         }
         Fade(visual, 0, Dismiss, accelerate: true);
         Spring(visual, "Scale", new Vector3(toScale, toScale, 1), SpringSpec.Exit);
-        Spring(visual, "Translation", new Vector3(slide, drop, 0), velocity is null ? SpringSpec.Exit : SpringSpec.Default,
-            handoff: velocity);
+        Spring(visual, "Translation", new Vector3(slide, drop, 0), SpringSpec.Exit);
         return Task.Delay(Dismiss);
     }
 
@@ -433,9 +432,6 @@ internal static class ProductMotion
         }
         Spring(visual, "Scale", target, spec ?? SpringSpec.Indicator);
     }
-
-    /// <summary>Drives an element's translation 1:1 during a gesture (no animation, no lag).</summary>
-    internal static void Track(FrameworkElement element, Vector2 offset) => Set(Prepare(element), "Translation", new Vector3(offset, 0));
 
     /// <summary>
     /// Starts an element invisible at the composition level. Never use XAML Opacity = 0 for elements that

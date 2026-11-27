@@ -409,8 +409,13 @@ internal sealed class GlassSurface
         }
         else if (!ProductMotion.Enabled)
         {
+            Backdrop.Fade(0, TimeSpan.Zero);
             Backdrop.Snap(Vector2.Zero, 1);
-            Backdrop.Fade(1, ProductMotion.CrossFade, from: 0);
+            var current = ++entering;
+            ProductMotion.AfterNextRender(() =>
+            {
+                if (current == entering) Backdrop.Fade(1, ProductMotion.CrossFade, from: 0);
+            });
         }
         else
         {
@@ -449,16 +454,12 @@ internal sealed class GlassSurface
         Backdrop.Spring(Vector2.Zero, 1, spring);
     }
 
-    /// <summary>
-    /// Leaves towards the origin it came from (symmetric path). <paramref name="velocity"/> (DIPs/s) hands off
-    /// a gesture so a flicked surface keeps travelling at the finger's speed.
-    /// </summary>
-    internal Task ExitAsync(float drop = 0, float slide = 0, float toScale = .975f, Vector2? velocity = null)
+    /// <summary>Leaves towards the origin it came from (symmetric path), continuing any motion it interrupts.</summary>
+    internal Task ExitAsync(float drop = 0, float slide = 0, float toScale = .975f)
     {
         entering++;
-        var handoff = velocity is { } v ? new Vector3(v, 0) : (Vector3?)null;
-        _ = ProductMotion.ExitAsync(Shadow, toScale, drop, slide, handoff);
-        var done = ProductMotion.ExitAsync(Panel, toScale, drop, slide, handoff);
+        _ = ProductMotion.ExitAsync(Shadow, toScale, drop, slide);
+        var done = ProductMotion.ExitAsync(Panel, toScale, drop, slide);
         if (!ProductMotion.Enabled)
         {
             Backdrop.Fade(0, ProductMotion.CrossFade, accelerate: true);
@@ -466,14 +467,14 @@ internal sealed class GlassSurface
         }
         // The blur dematerializes a touch ahead of the tint, so no milky ghost lingers after the panel has gone.
         Backdrop.Fade(0, ProductMotion.Dismiss * .8, accelerate: true);
-        Backdrop.Spring(new Vector2(slide, drop), toScale, velocity is null ? SpringSpec.Exit : SpringSpec.Default, velocity: velocity);
+        Backdrop.Spring(new Vector2(slide, drop), toScale, SpringSpec.Exit);
         return done;
     }
 
     /// <summary>
-    /// Call right after hiding the window without an exit animation. DWM shows a window's last composed state the
-    /// moment it is shown again, before the next entrance runs; a hidden surface left "on" therefore flashed its
-    /// blur for a frame on the next show (measured). Concealing leaves nothing stale to show.
+    /// Call right after hiding the window without an exit animation. A shown window first presents its last
+    /// composed state; concealing the surface on hide guarantees nothing stale (a visible blur without its panel)
+    /// can appear before the next entrance runs. Every entrance starts from this concealed state.
     /// </summary>
     internal void Conceal()
     {
@@ -481,28 +482,5 @@ internal sealed class GlassSurface
         ProductMotion.Hide(Panel);
         ProductMotion.Hide(Shadow);
         Backdrop.Fade(0, TimeSpan.Zero);
-    }
-
-    /// <summary>Follows a gesture 1:1 (offset in DIPs) with no animation, ready for a velocity hand-off on release.</summary>
-    internal void Track(Vector2 offset)
-    {
-        entering++;
-        ProductMotion.Track(Panel, offset);
-        ProductMotion.Track(Shadow, offset);
-        Backdrop.Snap(offset, 1);
-    }
-
-    /// <summary>Springs back to rest after a gesture that did not commit, continuing the finger's velocity.</summary>
-    internal void Release(Vector2 velocity)
-    {
-        if (!ProductMotion.Enabled)
-        {
-            Track(Vector2.Zero);
-            return;
-        }
-        var handoff = new Vector3(velocity, 0);
-        ProductMotion.Spring(ProductMotion.Prepare(Panel), "Translation", Vector3.Zero, SpringSpec.Momentum, handoff: handoff);
-        ProductMotion.Spring(ProductMotion.Prepare(Shadow), "Translation", Vector3.Zero, SpringSpec.Momentum, handoff: handoff);
-        Backdrop.Spring(Vector2.Zero, 1, SpringSpec.Momentum, velocity: velocity);
     }
 }
