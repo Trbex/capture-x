@@ -374,6 +374,7 @@ internal sealed class QuickAccessWindow : Window
         entryIndex = null;
         shownIndex = null;
         AppWindow.Hide();
+        glass.Conceal();
     }
 
     public async Task DismissAsync()

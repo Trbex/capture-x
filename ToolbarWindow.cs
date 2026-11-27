@@ -100,13 +100,25 @@ internal sealed class ToolbarWindow : Window
         AddTile(Tile("Scroll", Glyph.Scroll, CaptureCommand.Scroll), 4);
         AddTile(Tile("Text", Glyph.Scan, CaptureCommand.Text), 5);
         var record = Tile("Record", Glyph.Video);
-        record.Click += (_, _) => TrayMenuWindow.Shared?.ShowMenu(NativeWindow.ScreenRect(this, record), null,
-            [new MenuSection("Record",
-                Mode(CaptureCommand.RecordRegion, "Record region", Glyph.Region, execute),
-                Mode(CaptureCommand.RecordDisplay, "Record display", Glyph.Display, execute))], 236);
+        record.Click += (_, _) =>
+        {
+            // The tile that owns the open menu keeps the highlight until the menu closes: tile and menu read as one object.
+            // (Set after ShowMenu: opening a menu first runs the previous menu's close callback.)
+            TrayMenuWindow.Shared?.ShowMenu(NativeWindow.ScreenRect(this, record), null,
+                [new MenuSection("Record",
+                    Mode(CaptureCommand.RecordRegion, "Record region", Glyph.Region, execute),
+                    Mode(CaptureCommand.RecordDisplay, "Record display", Glyph.Display, execute))], 236,
+                onClosed: () =>
+                {
+                    menuOwner = null;
+                    Slide(selected);
+                });
+            menuOwner = record;
+            Slide(record);
+        };
         AddTile(record, 6);
         selected = captureButtons[0];
-        modes.PointerExited += (_, _) => Slide(selected);
+        modes.PointerExited += (_, _) => Slide(menuOwner ?? selected);
         modes.SizeChanged += (_, _) => Slide(selected, animate: false);
         Grid.SetRow(modes, 2);
         shell.Children.Add(modes);
@@ -162,7 +174,7 @@ internal sealed class ToolbarWindow : Window
             button.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, _) => Press(button, false)), true);
             button.PointerExited += (_, _) => Press(button, false);
             button.GotFocus += (_, _) => Slide(button);
-            button.LostFocus += (_, _) => Slide(selected);
+            button.LostFocus += (_, _) => Slide(menuOwner ?? selected);
             return button;
         }
 
@@ -177,6 +189,7 @@ internal sealed class ToolbarWindow : Window
     private double Scale() => Math.Max(96, NativeWindow.GetDpiForWindow(NativeWindow.Handle(this))) / 96.0;
 
     private Button? pressed;
+    private Button? menuOwner;
 
     private void Press(Button tile, bool down)
     {
@@ -229,6 +242,7 @@ internal sealed class ToolbarWindow : Window
     {
         revision++;
         AppWindow.Hide();
+        glass.Conceal();
     }
 
     public async Task AnimateHideAsync()

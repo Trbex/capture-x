@@ -124,6 +124,7 @@ internal sealed class TrayMenuWindow : Window
         revision++;
         dismissing = false;
         AppWindow.Hide();
+        glass.Conceal();
         var callback = closed;
         closed = null;
         callback?.Invoke();

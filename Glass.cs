@@ -415,12 +415,13 @@ internal sealed class GlassSurface
         else
         {
             // The blur lives on the system compositor, which presents immediately, while the XAML panel's first
-            // frame needs a layout pass after the window is shown. Hold the blur invisible at its start pose and
-            // begin its motion with the XAML frame, so material and panel arrive as one object.
+            // frame of a newly shown window arrives only after layout and rendering (measured up to ~100 ms). Hold
+            // the blur invisible at its start pose and begin its motion once XAML has rendered, so material and
+            // panel arrive as one object.
             Backdrop.Fade(0, TimeSpan.Zero);
             Backdrop.Snap(new Vector2(slide, rise), fromScale);
             var current = ++entering;
-            ProductMotion.OnNextFrame(() =>
+            ProductMotion.AfterNextRender(() =>
             {
                 if (current != entering) return;
                 Backdrop.Fade(1, ProductMotion.Popup, from: 0);
@@ -463,9 +464,23 @@ internal sealed class GlassSurface
             Backdrop.Fade(0, ProductMotion.CrossFade, accelerate: true);
             return done;
         }
-        Backdrop.Fade(0, ProductMotion.Dismiss, accelerate: true);
+        // The blur dematerializes a touch ahead of the tint, so no milky ghost lingers after the panel has gone.
+        Backdrop.Fade(0, ProductMotion.Dismiss * .8, accelerate: true);
         Backdrop.Spring(new Vector2(slide, drop), toScale, velocity is null ? SpringSpec.Exit : SpringSpec.Default, velocity: velocity);
         return done;
+    }
+
+    /// <summary>
+    /// Call right after hiding the window without an exit animation. DWM shows a window's last composed state the
+    /// moment it is shown again, before the next entrance runs; a hidden surface left "on" therefore flashed its
+    /// blur for a frame on the next show (measured). Concealing leaves nothing stale to show.
+    /// </summary>
+    internal void Conceal()
+    {
+        entering++;
+        ProductMotion.Hide(Panel);
+        ProductMotion.Hide(Shadow);
+        Backdrop.Fade(0, TimeSpan.Zero);
     }
 
     /// <summary>Follows a gesture 1:1 (offset in DIPs) with no animation, ready for a velocity hand-off on release.</summary>

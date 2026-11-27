@@ -160,6 +160,9 @@ internal sealed class PinnedWindow : Window
             Y = (int)Math.Round(position.Y + SpringMath.Project(vy) + size.Height / 2.0)
         };
         var work = NativeWindow.GetMonitor(NativeWindow.MonitorFromPoint(landing, 2)).Work;
+        // Comes to rest a little clear of the display edge, like every other floating surface.
+        var gap = (int)Math.Round(12 * Math.Max(96, NativeWindow.GetDpiForWindow(NativeWindow.Handle(this))) / 96.0);
+        inset -= gap;
         var projectedX = landing.X - size.Width / 2.0;
         var projectedY = landing.Y - size.Height / 2.0;
         var x = Math.Clamp(projectedX, work.Left - inset, Math.Max(work.Left - inset, work.Right - size.Width + inset));

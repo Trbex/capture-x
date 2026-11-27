@@ -276,16 +276,16 @@ internal static class ProductMotion
     private static readonly ConditionalWeakTable<FrameworkElement, Pivot> pivots = new();
     private static readonly ConditionalWeakTable<object, Dictionary<string, SpringTrack>> tracks = new();
 
-    /// <summary>Runs an action at the start of the next XAML frame (once).</summary>
-    internal static void OnNextFrame(Action action)
+    /// <summary>Runs an action once XAML has actually rendered its next frame (after layout of newly shown content).</summary>
+    internal static void AfterNextRender(Action action)
     {
-        EventHandler<object>? handler = null;
+        EventHandler<Microsoft.UI.Xaml.Media.RenderedEventArgs>? handler = null;
         handler = (_, _) =>
         {
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= handler;
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendered -= handler;
             action();
         };
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += handler;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendered += handler;
     }
 
     /// <summary>Full motion allowed (Windows animation effects on and the app's Reduce motion off).</summary>
