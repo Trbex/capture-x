@@ -60,7 +60,9 @@ internal sealed class ToolbarWindow : Window
         split.Height = 16;
         utility.Children.Add(split);
         utility.Children.Add(Appearance.IconButton(Glyph.Settings, "Settings", () => execute(CaptureCommand.Settings), 32));
-        utility.Children.Add(Appearance.IconButton(Glyph.More, "Quick menu", () => OpenMenu(compact: true), 32));
+        Button more = null!;
+        more = Appearance.IconButton(Glyph.More, "Quick menu", () => context(NativeWindow.ScreenRect(this, more), true), 32);
+        utility.Children.Add(more);
         utility.Children.Add(Appearance.IconButton(Glyph.Close, "Hide toolbar", hide, 32));
         Grid.SetColumn(utility, 2);
         header.Children.Add(utility);
@@ -116,23 +118,16 @@ internal sealed class ToolbarWindow : Window
             e.Handled = true;
             hide();
         };
+        // A right click opens the full menu at the pointer, growing out of the point that was clicked.
         glass.Panel.RightTapped += (_, e) =>
         {
-            OpenMenu(compact: false);
+            var point = e.GetPosition(null);
+            var scale = Scale();
+            var x = AppWindow.Position.X + (int)Math.Round(point.X * scale);
+            var y = AppWindow.Position.Y + (int)Math.Round(point.Y * scale);
+            context(new NativeWindow.Rect { Left = x, Right = x, Top = y, Bottom = y }, false);
             e.Handled = true;
         };
-
-        void OpenMenu(bool compact)
-        {
-            var position = AppWindow.Position;
-            var size = AppWindow.Size;
-            var inset = (int)Math.Round(GlassSurface.Margin * Scale());
-            context(new NativeWindow.Rect
-            {
-                Left = position.X + inset, Right = position.X + size.Width - inset,
-                Top = position.Y + inset, Bottom = position.Y + size.Height - inset
-            }, compact);
-        }
 
         Button Tile(string label, Glyph glyph, CaptureCommand? command = null)
         {
@@ -160,6 +155,12 @@ internal sealed class ToolbarWindow : Window
                     execute(mode);
                 };
             button.PointerEntered += (_, _) => Slide(button);
+            // The shared pill is the physical object under the finger: it gives a little on press (pointer-down,
+            // not click) and springs back on release, cancel or leaving the tile.
+            button.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => Press(button, true)), true);
+            button.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => Press(button, false)), true);
+            button.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, _) => Press(button, false)), true);
+            button.PointerExited += (_, _) => Press(button, false);
             button.GotFocus += (_, _) => Slide(button);
             button.LostFocus += (_, _) => Slide(selected);
             return button;
@@ -174,6 +175,17 @@ internal sealed class ToolbarWindow : Window
     }
 
     private double Scale() => Math.Max(96, NativeWindow.GetDpiForWindow(NativeWindow.Handle(this))) / 96.0;
+
+    private Button? pressed;
+
+    private void Press(Button tile, bool down)
+    {
+        if (down) pressed = tile;
+        else if (!ReferenceEquals(pressed, tile)) return;
+        else pressed = null;
+        var scale = down ? .955f : 1f;
+        ProductMotion.ScaleTo(indicator, new Vector2(scale, scale), spec: SpringSpec.Press);
+    }
 
     /// <summary>Moves the shared highlight pill to a tile; a spring keeps hover → hover travel fluid.</summary>
     private void Slide(Button tile, bool animate = true)
@@ -203,7 +215,8 @@ internal sealed class ToolbarWindow : Window
             GlassSurface.Outer(PanelHeight), .5, .88, GlassSurface.Margin);
         Activate();
         Slide(selected, animate: false);
-        if (!visible) glass.Enter(rise: 10);
+        // Rises out of the bottom of the screen area it sits above and sinks back the same way when hidden.
+        if (!visible) glass.Enter(rise: 10, origin: new Vector2(.5f, 1));
         else glass.Settle();
     }
 

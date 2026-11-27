@@ -27,17 +27,17 @@
                         <VisualStateManager.VisualStateGroups>
                             <VisualStateGroup x:Name="CommonStates">
                                 <VisualStateGroup.Transitions>
-                                    <VisualTransition From="Normal" To="PointerOver" GeneratedDuration="0:0:0.12">
+                                    <VisualTransition From="Normal" To="PointerOver" GeneratedDuration="0:0:0.09">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
                                     <VisualTransition From="PointerOver" To="Normal" GeneratedDuration="0:0:0.2">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
-                                    <VisualTransition To="Pressed" GeneratedDuration="0:0:0.08">
+                                    <VisualTransition To="Pressed" GeneratedDuration="0:0:0.05">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
-                                    <VisualTransition From="Pressed" GeneratedDuration="0:0:0.22">
-                                        <VisualTransition.GeneratedEasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.35"/></VisualTransition.GeneratedEasingFunction>
+                                    <VisualTransition From="Pressed" GeneratedDuration="0:0:0.2">
+                                        <VisualTransition.GeneratedEasingFunction><ExponentialEase EasingMode="EaseOut" Exponent="5"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
                                 </VisualStateGroup.Transitions>
                                 <VisualState x:Name="Normal"/>
@@ -97,17 +97,17 @@
                         <VisualStateManager.VisualStateGroups>
                             <VisualStateGroup x:Name="CommonStates">
                                 <VisualStateGroup.Transitions>
-                                    <VisualTransition From="Normal" To="PointerOver" GeneratedDuration="0:0:0.12">
+                                    <VisualTransition From="Normal" To="PointerOver" GeneratedDuration="0:0:0.09">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
                                     <VisualTransition From="PointerOver" To="Normal" GeneratedDuration="0:0:0.2">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
-                                    <VisualTransition To="Pressed" GeneratedDuration="0:0:0.08">
+                                    <VisualTransition To="Pressed" GeneratedDuration="0:0:0.05">
                                         <VisualTransition.GeneratedEasingFunction><CubicEase EasingMode="EaseOut"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
-                                    <VisualTransition From="Pressed" GeneratedDuration="0:0:0.22">
-                                        <VisualTransition.GeneratedEasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.35"/></VisualTransition.GeneratedEasingFunction>
+                                    <VisualTransition From="Pressed" GeneratedDuration="0:0:0.2">
+                                        <VisualTransition.GeneratedEasingFunction><ExponentialEase EasingMode="EaseOut" Exponent="5"/></VisualTransition.GeneratedEasingFunction>
                                     </VisualTransition>
                                 </VisualStateGroup.Transitions>
                                 <VisualState x:Name="Normal"/>

@@ -20,6 +20,7 @@ internal sealed class TrayMenuWindow : Window
     private Action? closed;
     private bool dismissing;
     private int revision;
+    private float exitDrop;
 
     public TrayMenuWindow(Action<CaptureCommand> execute)
     {
@@ -78,7 +79,10 @@ internal sealed class TrayMenuWindow : Window
             new MenuAction("Settings", Glyph.Gear, () => execute(CaptureCommand.Settings)),
             new MenuAction("Capture history", Glyph.History, () => execute(CaptureCommand.History)));
         Title = compact ? "REAL Capture X — Quick menu" : "REAL Capture X — Commands";
-        ShowMenu(anchor, header, sections, compact ? 300 : 320);
+        // A point anchor (right click) opens to the right of the pointer like a Windows context menu;
+        // a control anchor (tray icon, … button) lines the menu up with the control's far edge.
+        var point = anchor.Width <= 1 && anchor.Height <= 1;
+        ShowMenu(anchor, header, sections, compact ? 300 : 320, alignLeft: point);
     }
 
     /// <summary>Opens any command list next to an anchor (physical screen pixels).</summary>
@@ -99,13 +103,15 @@ internal sealed class TrayMenuWindow : Window
         host.Children.Add(content);
         content.Measure(new Windows.Foundation.Size(width - 2, double.PositiveInfinity));
         var height = (int)Math.Ceiling(content.DesiredSize.Height) + 2;
-        var above = NativeWindow.PlacePopup(this, anchor, GlassSurface.Outer(width), GlassSurface.Outer(height),
+        var (above, origin) = NativeWindow.PlacePopup(this, anchor, GlassSurface.Outer(width), GlassSurface.Outer(height),
             GlassSurface.Margin, alignLeft);
+        exitDrop = above ? 4 : -4;
         scroller.ChangeView(null, 0, null, disableAnimation: true);
         Activate();
         NativeWindow.SetForegroundWindow(NativeWindow.Handle(this));
-        glass.Enter(rise: above ? 8 : -8);
-        content.Stagger(above ? 4 : -4);
+        // Grows out of the control that opened it (scale from the anchor side, a short travel away from it);
+        // the rows arrive with the panel instead of cascading, so the menu is usable on its first frame.
+        glass.Enter(rise: above ? 6 : -6, fromScale: .94f, spec: SpringSpec.Snappy, origin: origin);
         content.FocusFirst();
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -129,7 +135,7 @@ internal sealed class TrayMenuWindow : Window
         dismissing = true;
         var current = ++revision;
         glass.Panel.IsHitTestVisible = false;
-        await glass.ExitAsync();
+        await glass.ExitAsync(drop: exitDrop, toScale: .96f);
         if (current == revision) HideNow();
     }
 }

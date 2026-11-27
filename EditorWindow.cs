@@ -366,6 +366,8 @@ internal sealed class EditorWindow : Window
         if (open)
         {
             BuildInspector();
+            // Slides in from the right edge it is docked to, and leaves the same way.
+            ProductMotion.SetOrigin(inspector, new Vector2(1, .5f));
             ProductMotion.Enter(inspector, fromScale: .985f, slide: 28);
         }
         else _ = ProductMotion.ExitAsync(inspector, toScale: .985f, slide: 28);
@@ -1203,9 +1205,14 @@ internal sealed class EditorWindow : Window
 
     private void AnimateFit() => AnimateZoom(0);
 
-    private long zoomAnimation;
+    private SpringDriver? zoomSpring;
+    private (float StartZoom, Vector2 StartView, Vector2 Anchor, bool Fit) zoomPlan;
 
-    /// <summary>Eases the canvas zoom over ~200 ms on the render loop (a frame per display refresh).</summary>
+    /// <summary>
+    /// Zooms on a critically damped spring in log space (every step feels the same size). Around a point the
+    /// view is derived from the zoom each frame, so the pixel under the cursor stays exactly put; repeated
+    /// zoom steps keep the zoom velocity instead of restarting from rest. Fit blends to the centred placement.
+    /// </summary>
     private void AnimateZoom(float target, Vector2? around = null)
     {
         if (bitmap is null) return;
@@ -1214,31 +1221,49 @@ internal sealed class EditorWindow : Window
         var anchor = around ?? new Vector2((float)canvas.ActualWidth / 2, (float)canvas.ActualHeight / 2);
         if (!ProductMotion.Enabled)
         {
+            zoomSpring?.Stop();
             zoom = target;
             if (target > 0) view = anchor - (anchor - startView) * (target / startZoom);
             canvas.Invalidate();
             return;
         }
-        var id = ++zoomAnimation;
-        var started = DateTime.UtcNow;
-        var duration = TimeSpan.FromMilliseconds(220);
-        void Tick(object? sender, object args)
+        if (zoomSpring is null)
         {
-            if (id != zoomAnimation || closed) { CompositionTarget.Rendering -= Tick; return; }
-            var t = Math.Clamp((float)((DateTime.UtcNow - started) / duration), 0, 1);
-            var eased = 1 - MathF.Pow(1 - t, 3);
-            var endZoom = target == 0 ? FitScale() : target;
-            var endView = target == 0 ? CenteredPlacement(endZoom) : anchor - (anchor - startView) * (target / startZoom);
-            zoom = startZoom + (endZoom - startZoom) * eased;
-            view = Vector2.Lerp(startView, endView, eased);
-            if (t >= 1)
+            zoomSpring = new SpringDriver(2, ApplyZoom, precision: .0004);
+            zoomSpring.Settled += () =>
             {
-                CompositionTarget.Rendering -= Tick;
-                if (target == 0) zoom = 0;
-            }
-            canvas.Invalidate();
+                if (zoomPlan.Fit) zoom = 0;
+                canvas.Invalidate();
+            };
         }
-        CompositionTarget.Rendering += Tick;
+        var carried = zoomSpring.IsRunning && !zoomPlan.Fit ? zoomSpring.Velocity[0] : 0;
+        zoomPlan = (startZoom, startView, anchor, target == 0);
+        zoomSpring.Reset([Math.Log(startZoom), 0], [carried, 0]);
+        zoomSpring.To([Math.Log(target == 0 ? FitScale() : target), 1], SpringSpec.Tracking);
+    }
+
+    private void ApplyZoom(double[] state)
+    {
+        if (closed)
+        {
+            zoomSpring?.Stop();
+            return;
+        }
+        var (startZoom, startView, anchor, fit) = zoomPlan;
+        if (fit)
+        {
+            // The fit target follows layout changes (properties panel sliding in) while the blend is running.
+            var progress = (float)state[1];
+            var endZoom = FitScale();
+            zoom = startZoom + (endZoom - startZoom) * progress;
+            view = Vector2.Lerp(startView, CenteredPlacement(endZoom), progress);
+        }
+        else
+        {
+            zoom = (float)Math.Exp(state[0]);
+            view = anchor - (anchor - startView) * (zoom / startZoom);
+        }
+        canvas.Invalidate();
     }
 
     private Vector2 CenteredPlacement(float at)

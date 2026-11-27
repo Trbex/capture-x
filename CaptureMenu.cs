@@ -14,7 +14,6 @@ internal sealed record MenuHeader(string Title, params MenuAction[] Tools);
 internal sealed class CaptureMenu : StackPanel
 {
     private readonly List<Button> rows = [];
-    private readonly List<FrameworkElement> staggered = [];
 
     public CaptureMenu(MenuHeader? header, MenuSection[] sections, Action<Action> invoke)
     {
@@ -56,7 +55,6 @@ internal sealed class CaptureMenu : StackPanel
                 label.CharacterSpacing = 40;
                 label.Margin = new Thickness(10, 4, 0, 4);
                 Children.Add(label);
-                staggered.Add(label);
             }
             foreach (var action in section.Actions) Children.Add(Row(action, invoke));
         }
@@ -99,17 +97,16 @@ internal sealed class CaptureMenu : StackPanel
         row.Content = face;
         row.Click += (_, _) => invoke(action.Execute);
         row.PointerEntered += (_, _) => row.Focus(FocusState.Pointer);
-        row.GotFocus += (_, _) => ProductMotion.Opacity(highlight, 1, TimeSpan.FromMilliseconds(70));
-        row.LostFocus += (_, _) => ProductMotion.Opacity(highlight, 0, TimeSpan.FromMilliseconds(150));
+        // The highlight lands on the row the instant the pointer reaches it and lingers briefly as it leaves,
+        // so sweeping down the menu reads as one continuous trail rather than flicker.
+        row.GotFocus += (_, _) => ProductMotion.Opacity(highlight, 1, TimeSpan.Zero);
+        row.LostFocus += (_, _) => ProductMotion.Opacity(highlight, 0, TimeSpan.FromMilliseconds(130));
         rows.Add(row);
-        staggered.Add(row);
         return row;
     }
 
     public void FocusFirst() => rows[0].Focus(FocusState.Programmatic);
 
-    /// <summary>Rows settle in one after another, 7 ms apart (capped), right after the popup opens.</summary>
-    public void Stagger(float rise) => ProductMotion.Stagger(staggered, TimeSpan.FromMilliseconds(7), rise);
 
     private void OnNavigation(object sender, KeyRoutedEventArgs e)
     {

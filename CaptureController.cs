@@ -197,11 +197,18 @@ internal sealed class CaptureController
                 return;
             }
 
-            var entry = await store.AddAsync(frame, command.ToString());
+            // The preview appears straight from the captured pixels while the PNG is still being written.
+            var mode = command.ToString();
+            var saving = Task.Run(() => store.AddAsync(frame, mode));
+            overlayMonitor = monitor;
+            var corner = settings.Corner;
+            var preview = settings.ShowPreview
+                ? quick.DisplayFreshAsync(frame, saving, monitor, captures.Count + 1, settings.Timeout, corner % 2, corner < 2 ? 1 : 0)
+                : Task.CompletedTask;
+            var entry = await saving;
             captures = new[] { entry }.Concat(captures).ToArray();
             overlayIndex = 0;
-            overlayMonitor = monitor;
-            if (settings.ShowPreview) await ShowOverlayAsync(animate: true);
+            await preview;
             if (settings.AutoCopy)
             {
                 await CopyAsync(entry);

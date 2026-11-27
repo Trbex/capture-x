@@ -85,7 +85,7 @@ internal sealed class ToastWindow : Window
         AppWindow.Show(false);
         NativeWindow.SetWindowPos(NativeWindow.Handle(this), NativeWindow.Topmost, 0, 0, 0, 0, NativeWindow.NoActivate | 0x0003);
         if (visible) glass.Settle();
-        else glass.Enter(rise: 14);
+        else glass.Enter(rise: 14, fromScale: .96f, spec: SpringSpec.Snappy, origin: new System.Numerics.Vector2(.5f, 1));
         timer.Stop();
         timer.Start();
     }

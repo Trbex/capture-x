@@ -26,6 +26,7 @@ internal sealed class GlassBackdrop : SystemBackdrop
     private double radius;
     private SystemComposition.CompositionRoundedRectangleGeometry? geometry;
     private SystemComposition.ShapeVisual? shape;
+    private SystemComposition.ContainerVisual? container;
     private SystemComposition.CompositionVisualSurface? surface;
     private SystemComposition.CompositionColorBrush? fill;
     private XamlRoot? root;
@@ -46,6 +47,25 @@ internal sealed class GlassBackdrop : SystemBackdrop
             Diagnostics.Log($"GlassBackdrop.Connect failed: {ex}");
             Appearance.BackdropUnavailable();
         }
+        IsReady = true;
+        var waiting = ready;
+        ready = null;
+        waiting?.Invoke();
+    }
+
+    private Action? ready;
+
+    /// <summary>
+    /// True once WinUI has connected the backdrop (or found it unavailable). That happens asynchronously after a
+    /// window is first shown, so the very first entrance has to wait for it or the blur would sit still at its
+    /// final place while the panel animates in.
+    /// </summary>
+    internal bool IsReady { get; private set; }
+
+    internal void WhenReady(Action action)
+    {
+        if (IsReady) action();
+        else ready += action;
     }
 
     private void Connect(ICompositionSupportsSystemBackdrop target, XamlRoot xamlRoot)
@@ -58,8 +78,12 @@ internal sealed class GlassBackdrop : SystemBackdrop
         sprite.FillBrush = fill;
         shape = compositor.CreateShapeVisual();
         shape.Shapes.Add(sprite);
+        // A visual surface renders its source visual as the root and ignores that root's own Offset and Scale
+        // (measured: the blur stayed put while the panel slid). The animated shape therefore lives one level down.
+        container = compositor.CreateContainerVisual();
+        container.Children.InsertAtTop(shape);
         surface = compositor.CreateVisualSurface();
-        surface.SourceVisual = shape;
+        surface.SourceVisual = container;
         // Mask brushes reject backdrop sources, so the rounded mask is applied through an effect graph.
         var effect = new AlphaMaskEffect
         {
@@ -81,10 +105,12 @@ internal sealed class GlassBackdrop : SystemBackdrop
         if (root is not null) root.Changed -= OnRootChanged;
         target.SystemBackdrop = null;
         surface?.Dispose();
+        container?.Dispose();
         shape?.Dispose();
         geometry?.Dispose();
         fill?.Dispose();
         surface = null;
+        container = null;
         shape = null;
         geometry = null;
         fill = null;
@@ -110,80 +136,93 @@ internal sealed class GlassBackdrop : SystemBackdrop
 
     private void Layout()
     {
-        if (root is null || geometry is null || shape is null || surface is null) return;
+        if (root is null || geometry is null || shape is null || surface is null || container is null) return;
         var scale = (float)root.RasterizationScale;
         var size = new Vector2((float)root.Size.Width, (float)root.Size.Height) * scale;
         if (size.X <= 0 || size.Y <= 0) return;
         var margin = (float)inset * scale;
         shape.Size = size;
+        container.Size = size;
         surface.SourceSize = size;
         geometry.Offset = new Vector2(margin, margin);
         geometry.Size = Vector2.Max(Vector2.Zero, size - new Vector2(margin * 2));
         geometry.CornerRadius = new Vector2((float)radius * scale);
-        shape.CenterPoint = new Vector3(size / 2, 0);
+        var panel = Vector2.Max(Vector2.Zero, size - new Vector2(margin * 2));
+        shape.CenterPoint = new Vector3(new Vector2(margin) + panel * origin, 0);
     }
 
-    /// <summary>Brings the backdrop mask back to fully shown from its current (possibly mid-exit) values.</summary>
-    internal void Settle(TimeSpan duration)
+    private Vector2 origin = new(.5f, .5f);
+
+    /// <summary>Normalized point of the panel the blurred backdrop scales from (matches the XAML panel's origin).</summary>
+    internal void SetOrigin(Vector2 value)
     {
-        if (compositor is null || shape is null || fill is null) return;
-        if (duration <= TimeSpan.Zero)
+        origin = value;
+        Layout();
+    }
+
+    private float Pixels => (float)(root?.RasterizationScale ?? 1);
+
+    /// <summary>
+    /// Moves and scales the blurred backdrop on the same spring as the XAML panel (offset in DIPs), starting from
+    /// its current on-screen value and velocity, so the blur never drifts from the panel or snaps when interrupted.
+    /// </summary>
+    internal void Spring(Vector2 offset, float scale, SpringSpec spec, Vector2? fromOffset = null, float? fromScale = null,
+        Vector2? velocity = null)
+    {
+        if (compositor is null || shape is null) return;
+        var pixels = Pixels;
+        var scaled = ProductMotion.Scaled(spec);
+        Start("Offset", new Vector3(offset * pixels, 0), fromOffset is { } a ? new Vector3(a * pixels, 0) : null,
+            velocity is { } v ? new Vector3(v * pixels, 0) : null);
+        Start("Scale", new Vector3(scale, scale, 1), fromScale is { } b ? new Vector3(b, b, 1) : null, null);
+
+        void Start(string property, Vector3 to, Vector3? from, Vector3? handoff)
         {
-            Animate(1, 1, 1, 1, TimeSpan.Zero);
-            return;
+            var initial = ProductMotion.Retarget(shape!, property, to, scaled, from, handoff);
+            var spring = compositor!.CreateSpringVector3Animation();
+            spring.FinalValue = to;
+            if (from is { } start) spring.InitialValue = start;
+            spring.InitialVelocity = initial;
+            spring.DampingRatio = spec.Damping;
+            spring.Period = scaled.CompositionPeriod;
+            spring.StopBehavior = SystemComposition.AnimationStopBehavior.SetToFinalValue;
+            shape!.StartAnimation(property, spring);
         }
-        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(.16f, 1), new Vector2(.3f, 1));
-        var scale = compositor.CreateVector3KeyFrameAnimation();
-        scale.InsertExpressionKeyFrame(0, "this.StartingValue");
-        scale.InsertKeyFrame(1, Vector3.One, ease);
-        scale.Duration = duration;
-        shape.StartAnimation("Scale", scale);
-        var move = compositor.CreateVector3KeyFrameAnimation();
-        move.InsertExpressionKeyFrame(0, "this.StartingValue");
-        move.InsertKeyFrame(1, Vector3.Zero, ease);
-        move.Duration = duration;
-        shape.StartAnimation("Offset", move);
-        var color = compositor.CreateColorKeyFrameAnimation();
-        color.InsertExpressionKeyFrame(0, "this.StartingValue");
-        color.InsertKeyFrame(1, Color.FromArgb(255, 255, 255, 255), ease);
-        color.Duration = duration;
-        fill.StartAnimation("Color", color);
     }
 
-    /// <summary>Animates the blurred backdrop together with the XAML panel so the glass never pops in.</summary>
-    internal void Animate(float fromOpacity, float toOpacity, float fromScale, float toScale, TimeSpan duration,
-        Vector2 fromOffset = default, Vector2 toOffset = default, bool accelerate = false)
+    /// <summary>Places the backdrop without motion (gesture tracking, reduced motion).</summary>
+    internal void Snap(Vector2 offset, float scale)
     {
-        if (compositor is null || shape is null || fill is null) return;
-        var pixels = (float)(root?.RasterizationScale ?? 1);
+        if (shape is null) return;
+        var pixels = Pixels;
+        shape.StopAnimation("Offset");
+        shape.StopAnimation("Scale");
+        shape.Offset = new Vector3(offset * pixels, 0);
+        shape.Scale = new Vector3(scale, scale, 1);
+        ProductMotion.Retarget(shape, "Offset", shape.Offset, SpringSpec.Default, shape.Offset, Vector3.Zero);
+        ProductMotion.Retarget(shape, "Scale", shape.Scale, SpringSpec.Default, shape.Scale, Vector3.Zero);
+    }
+
+    /// <summary>Fades the blur in or out with the panel's opacity curve, from its current value.</summary>
+    internal void Fade(float opacity, TimeSpan duration, bool accelerate = false, float? from = null)
+    {
+        if (compositor is null || fill is null) return;
+        var color = Color.FromArgb((byte)Math.Round(255 * Math.Clamp(opacity, 0, 1)), 255, 255, 255);
         if (duration <= TimeSpan.Zero)
         {
-            shape.StopAnimation("Scale");
-            shape.StopAnimation("Offset");
             fill.StopAnimation("Color");
-            shape.Scale = new Vector3(toScale, toScale, 1);
-            shape.Offset = new Vector3(toOffset * pixels, 0);
-            fill.Color = Color.FromArgb((byte)(255 * toOpacity), 255, 255, 255);
+            fill.Color = color;
             return;
         }
         var ease = accelerate
             ? compositor.CreateCubicBezierEasingFunction(new Vector2(.4f, 0), new Vector2(1, 1))
             : compositor.CreateCubicBezierEasingFunction(new Vector2(.16f, 1), new Vector2(.3f, 1));
-        var move = compositor.CreateVector3KeyFrameAnimation();
-        move.InsertKeyFrame(0, new Vector3(fromOffset * pixels, 0));
-        move.InsertKeyFrame(1, new Vector3(toOffset * pixels, 0), ease);
-        move.Duration = duration;
-        shape.StartAnimation("Offset", move);
-        var scale = compositor.CreateVector3KeyFrameAnimation();
-        scale.InsertKeyFrame(0, new Vector3(fromScale, fromScale, 1));
-        scale.InsertKeyFrame(1, new Vector3(toScale, toScale, 1), ease);
-        scale.Duration = duration;
-        shape.StartAnimation("Scale", scale);
-        var color = compositor.CreateColorKeyFrameAnimation();
-        color.InsertKeyFrame(0, Color.FromArgb((byte)(255 * fromOpacity), 255, 255, 255));
-        color.InsertKeyFrame(1, Color.FromArgb((byte)(255 * toOpacity), 255, 255, 255), ease);
-        color.Duration = duration;
-        fill.StartAnimation("Color", color);
+        var animation = compositor.CreateColorKeyFrameAnimation();
+        if (from is { } start) animation.InsertKeyFrame(0, Color.FromArgb((byte)Math.Round(255 * start), 255, 255, 255));
+        else animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+        animation.InsertKeyFrame(1, color, ease);
+        animation.Duration = duration;
+        fill.StartAnimation("Color", animation);
     }
 }
 
@@ -295,7 +334,8 @@ internal static class GlassShadow
 
 /// <summary>
 /// A floating window body: transparent HWND margin for the shadow, blurred backdrop, tinted rounded
-/// panel with a hairline rim. Enter/exit animate the XAML panel and the system backdrop together.
+/// panel with a hairline rim. Panel, shadow and backdrop always move as one object: same spring, same
+/// origin, same starting point, so the material reads as a single physical surface.
 /// </summary>
 internal sealed class GlassSurface
 {
@@ -304,6 +344,7 @@ internal sealed class GlassSurface
     internal Border Panel { get; }
     internal GlassBackdrop Backdrop { get; }
     internal double Radius { get; }
+    private Grid Shadow { get; }
 
     internal GlassSurface(Window window, FrameworkElement content, double radius = 14)
     {
@@ -327,33 +368,126 @@ internal sealed class GlassSurface
         Shadow = shadow;
     }
 
-    private Grid Shadow { get; }
-
     /// <summary>Outer window size (DIPs) for a panel of the given size.</summary>
     internal static int Outer(double panel) => (int)Math.Ceiling(panel + Margin * 2);
 
-    /// <summary>Panel, shadow and blurred backdrop pop in together (fade, scale and an optional slide).</summary>
-    internal void Enter(bool animate = true, float rise = 0, float slide = 0)
+    /// <summary>
+    /// Where the surface grows from and shrinks back into, normalized to the panel ((.5,1) = bottom centre).
+    /// Popups pass the side facing the control that opened them, so they stay physically connected to it.
+    /// </summary>
+    internal void SetOrigin(Vector2 value)
     {
-        ProductMotion.Enter(Panel, animate, rise, slide: slide);
-        ProductMotion.Enter(Shadow, animate, rise, slide: slide);
-        var on = animate && ProductMotion.Enabled;
-        Backdrop.Animate(0, 1, .965f, 1, on ? ProductMotion.Popup : TimeSpan.Zero, new Vector2(slide, rise), Vector2.Zero);
+        ProductMotion.SetOrigin(Panel, value);
+        ProductMotion.SetOrigin(Shadow, value, (float)Margin);
+        Backdrop.SetOrigin(value);
     }
 
-    /// <summary>Show again while already visible (e.g. during an exit animation): settle everything from current values.</summary>
-    internal void Settle()
+    /// <summary>Panel, shadow and blurred backdrop arrive together: fade, scale from the origin and an optional slide.</summary>
+    internal void Enter(bool animate = true, float rise = 0, float slide = 0, float fromScale = .965f, SpringSpec? spec = null,
+        Vector2? origin = null, Vector2? velocity = null)
     {
-        ProductMotion.Settle(Panel);
-        ProductMotion.Settle(Shadow);
-        Backdrop.Settle(ProductMotion.Enabled ? ProductMotion.Hover : TimeSpan.Zero);
+        if (!Backdrop.IsReady)
+        {
+            // First show of this window: keep the panel invisible until the blur exists, then enter as one object.
+            var current = ++entering;
+            ProductMotion.Hide(Panel);
+            ProductMotion.Hide(Shadow);
+            Backdrop.WhenReady(() =>
+            {
+                if (current == entering) Enter(animate, rise, slide, fromScale, spec, origin, velocity);
+            });
+            return;
+        }
+        SetOrigin(origin ?? new Vector2(.5f, .5f));
+        var spring = spec ?? SpringSpec.Default;
+        ProductMotion.Enter(Panel, animate, rise, fromScale, slide, spring, velocity);
+        ProductMotion.Enter(Shadow, animate, rise, fromScale, slide, spring, velocity);
+        if (!animate)
+        {
+            Backdrop.Snap(Vector2.Zero, 1);
+            Backdrop.Fade(1, TimeSpan.Zero);
+        }
+        else if (!ProductMotion.Enabled)
+        {
+            Backdrop.Snap(Vector2.Zero, 1);
+            Backdrop.Fade(1, ProductMotion.CrossFade, from: 0);
+        }
+        else
+        {
+            // The blur lives on the system compositor, which presents immediately, while the XAML panel's first
+            // frame needs a layout pass after the window is shown. Hold the blur invisible at its start pose and
+            // begin its motion with the XAML frame, so material and panel arrive as one object.
+            Backdrop.Fade(0, TimeSpan.Zero);
+            Backdrop.Snap(new Vector2(slide, rise), fromScale);
+            var current = ++entering;
+            ProductMotion.OnNextFrame(() =>
+            {
+                if (current != entering) return;
+                Backdrop.Fade(1, ProductMotion.Popup, from: 0);
+                Backdrop.Spring(Vector2.Zero, 1, spring, new Vector2(slide, rise), fromScale, velocity);
+            });
+        }
     }
 
-    internal Task ExitAsync(float drop = 0, float slide = 0)
+    private int entering;
+
+    /// <summary>Show again while already visible (e.g. during an exit animation): settle everything from current values and velocity.</summary>
+    internal void Settle(SpringSpec? spec = null)
     {
-        if (!ProductMotion.Enabled) return Task.CompletedTask;
-        Backdrop.Animate(1, 0, 1, .975f, ProductMotion.Dismiss, Vector2.Zero, new Vector2(slide, drop), accelerate: true);
-        _ = ProductMotion.ExitAsync(Shadow, drop: drop, slide: slide);
-        return ProductMotion.ExitAsync(Panel, drop: drop, slide: slide);
+        entering++;
+        var spring = spec ?? SpringSpec.Default;
+        ProductMotion.Settle(Panel, spring);
+        ProductMotion.Settle(Shadow, spring);
+        if (!ProductMotion.Enabled)
+        {
+            Backdrop.Snap(Vector2.Zero, 1);
+            Backdrop.Fade(1, ProductMotion.CrossFade);
+            return;
+        }
+        Backdrop.Fade(1, ProductMotion.Hover);
+        Backdrop.Spring(Vector2.Zero, 1, spring);
+    }
+
+    /// <summary>
+    /// Leaves towards the origin it came from (symmetric path). <paramref name="velocity"/> (DIPs/s) hands off
+    /// a gesture so a flicked surface keeps travelling at the finger's speed.
+    /// </summary>
+    internal Task ExitAsync(float drop = 0, float slide = 0, float toScale = .975f, Vector2? velocity = null)
+    {
+        entering++;
+        var handoff = velocity is { } v ? new Vector3(v, 0) : (Vector3?)null;
+        _ = ProductMotion.ExitAsync(Shadow, toScale, drop, slide, handoff);
+        var done = ProductMotion.ExitAsync(Panel, toScale, drop, slide, handoff);
+        if (!ProductMotion.Enabled)
+        {
+            Backdrop.Fade(0, ProductMotion.CrossFade, accelerate: true);
+            return done;
+        }
+        Backdrop.Fade(0, ProductMotion.Dismiss, accelerate: true);
+        Backdrop.Spring(new Vector2(slide, drop), toScale, velocity is null ? SpringSpec.Exit : SpringSpec.Default, velocity: velocity);
+        return done;
+    }
+
+    /// <summary>Follows a gesture 1:1 (offset in DIPs) with no animation, ready for a velocity hand-off on release.</summary>
+    internal void Track(Vector2 offset)
+    {
+        entering++;
+        ProductMotion.Track(Panel, offset);
+        ProductMotion.Track(Shadow, offset);
+        Backdrop.Snap(offset, 1);
+    }
+
+    /// <summary>Springs back to rest after a gesture that did not commit, continuing the finger's velocity.</summary>
+    internal void Release(Vector2 velocity)
+    {
+        if (!ProductMotion.Enabled)
+        {
+            Track(Vector2.Zero);
+            return;
+        }
+        var handoff = new Vector3(velocity, 0);
+        ProductMotion.Spring(ProductMotion.Prepare(Panel), "Translation", Vector3.Zero, SpringSpec.Momentum, handoff: handoff);
+        ProductMotion.Spring(ProductMotion.Prepare(Shadow), "Translation", Vector3.Zero, SpringSpec.Momentum, handoff: handoff);
+        Backdrop.Spring(Vector2.Zero, 1, SpringSpec.Momentum, velocity: velocity);
     }
 }
