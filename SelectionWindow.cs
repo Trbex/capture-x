@@ -45,7 +45,6 @@ internal sealed class SelectionWindow : Window
     private CanvasBitmap? pixels;
     private Windows.Foundation.Point pointer;
     private RectInt32 shown;
-    private long tween;
     private readonly Image image = new() { Stretch = Microsoft.UI.Xaml.Media.Stretch.Fill, IsHitTestVisible = false };
     private NativeWindow.Point? start;
     private RectInt32 area;
@@ -141,7 +140,7 @@ internal sealed class SelectionWindow : Window
         };
         Closed += (_, _) =>
         {
-            tween++;
+            glide?.Stop();
             result.TrySetResult(null);
             loupe.RemoveFromVisualTree();
             pixels?.Dispose();
@@ -299,29 +298,27 @@ internal sealed class SelectionWindow : Window
         Glide(area);
     }
 
-    /// <summary>Eases the window highlight to a new rectangle over ~140 ms on the render loop.</summary>
+    private SpringDriver? glide;
+
+    /// <summary>
+    /// Window mode: the highlight flows to the next window on a spring from wherever it is on screen, so
+    /// sweeping across several windows reads as one continuous motion instead of restarting at each one.
+    /// </summary>
     private void Glide(RectInt32 target)
     {
         if (target.Equals(shown)) return;
         var from = shown;
         shown = target;
+        glide ??= new SpringDriver(4, value => UpdateMask(new RectInt32((int)Math.Round(value[0]), (int)Math.Round(value[1]),
+            (int)Math.Round(value[2]), (int)Math.Round(value[3]))), precision: .5);
+        double[] goal = [target.X, target.Y, target.Width, target.Height];
         if (!ProductMotion.Enabled || from.Width == 0 || target.Width == 0)
         {
-            UpdateMask(target);
+            glide.Snap(goal);
             return;
         }
-        var id = ++tween;
-        var started = DateTime.UtcNow;
-        void Tick(object? sender, object args)
-        {
-            if (id != tween) { Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Tick; return; }
-            var t = Math.Clamp((DateTime.UtcNow - started).TotalMilliseconds / 140, 0, 1);
-            var e = 1 - Math.Pow(1 - t, 3);
-            int Lerp(int a, int b) => (int)Math.Round(a + (b - a) * e);
-            UpdateMask(new RectInt32(Lerp(from.X, target.X), Lerp(from.Y, target.Y), Lerp(from.Width, target.Width), Lerp(from.Height, target.Height)));
-            if (t >= 1) Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Tick;
-        }
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += Tick;
+        if (!glide.IsRunning) glide.Reset([from.X, from.Y, from.Width, from.Height]);
+        glide.To(goal, SpringSpec.Tracking);
     }
 
     private NativeWindow.Point ToPixel(Point point) => new()

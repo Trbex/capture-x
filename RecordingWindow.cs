@@ -174,7 +174,7 @@ internal sealed class RecordingWindow : Window
     {
         Place(compact: false);
         Activate();
-        glass.Enter(rise: -10);
+        glass.Enter(rise: -10, origin: new Vector2(compactOrigin, 0));
         return result.Task;
     }
 
@@ -183,6 +183,9 @@ internal sealed class RecordingWindow : Window
         await glass.ExitAsync(drop: -8);
         if (!closed) Close();
     }
+
+    /// <summary>The setup panel hangs from the top-right corner of the display, so it grows from there.</summary>
+    private const float compactOrigin = 1f;
 
     private void Place(bool compact) => NativeWindow.Place(this, monitor,
         GlassSurface.Outer(compact ? CapsuleWidth : SetupWidth), GlassSurface.Outer(compact ? CapsuleHeight : SetupHeight),
@@ -223,7 +226,8 @@ internal sealed class RecordingWindow : Window
         glass.Panel.CornerRadius = new CornerRadius(compact ? CapsuleHeight / 2.0 : 16);
         glass.Backdrop.SetRadius(compact ? CapsuleHeight / 2.0 : 16);
         Place(compact);
-        glass.Enter(rise: -8);
+        // The setup panel condenses into the capsule at the top edge: it pops from the top, not the centre.
+        glass.Enter(rise: -8, fromScale: .92f, spec: SpringSpec.Snappy, origin: new Vector2(.5f, 0));
         Pulse(compact);
     }
 

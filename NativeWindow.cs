@@ -213,9 +213,10 @@ internal static class NativeWindow
 
     /// <summary>
     /// Places a popup next to an anchor (physical pixels), preferring above it and right-aligned, clamped to
-    /// the work area. Returns true when the popup opened above the anchor (used for the slide direction).
+    /// the work area. Returns whether the popup opened above the anchor and the point of the panel (normalized)
+    /// closest to the anchor's centre, so the popup can grow out of the control that opened it.
     /// </summary>
-    internal static bool PlacePopup(Window window, Rect anchor, int width, int height, double glass = 0, bool alignLeft = false)
+    internal static (bool Above, System.Numerics.Vector2 Origin) PlacePopup(Window window, Rect anchor, int width, int height, double glass = 0, bool alignLeft = false)
     {
         var center = new Point { X = anchor.Left + anchor.Width / 2, Y = anchor.Top + anchor.Height / 2 };
         var monitor = MonitorFromPoint(center, 2);
@@ -236,7 +237,9 @@ internal static class NativeWindow
         var opensAbove = above >= work.Top + gap;
         var panelY = Math.Clamp(opensAbove ? above : below, work.Top + gap, work.Bottom - panelH - gap);
         window.AppWindow.MoveAndResize(new RectInt32(panelX - margin, panelY - margin, w, h));
-        return opensAbove;
+        var originX = panelW > 0 ? Math.Clamp((center.X - panelX) / (float)panelW, 0f, 1f) : .5f;
+        var originY = panelY >= anchor.Bottom - gap ? 0f : panelY + panelH <= anchor.Top + gap ? 1f : .5f;
+        return (opensAbove, new System.Numerics.Vector2(originX, originY));
     }
 
     /// <summary>Screen rectangle (physical pixels) of an element inside a window.</summary>

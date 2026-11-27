@@ -162,9 +162,9 @@ internal static class Appearance
             }
         }
 
-        foreach (var (window, (root, caption, _)) in windows)
+        foreach (var (window, (root, caption, floating)) in windows)
         {
-            root.RequestedTheme = theme;
+            ApplyTheme(root, floating);
             if (caption) StyleTitleBar(window);
         }
 
@@ -183,8 +183,21 @@ internal static class Appearance
         {
             Text = value, FontSize = size, FontFamily = size >= 20 ? heading : normal, Foreground = brush ?? Text,
             FontWeight = strong ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center, CharacterSpacing = Tracking(size)
         };
+
+    /// <summary>
+    /// Size-specific tracking (1/1000 em): display sizes tighten as they grow, captions open up slightly for
+    /// legibility, body text stays at the typeface's own spacing.
+    /// </summary>
+    internal static int Tracking(double size) => size switch
+    {
+        >= 28 => -18,
+        >= 20 => -12,
+        >= 15 => -6,
+        <= 11 => 12,
+        _ => 0
+    };
 
     /// <summary>Keycap label, e.g. "Ctrl ⇧ 1".</summary>
     internal static Border Key(string key) => new()
@@ -320,9 +333,26 @@ internal static class Appearance
         }
         else window.Content = root;
 
-        root.RequestedTheme = theme;
+        ApplyTheme(root, floating);
         windows.Add(window, (root, caption is not null, floating));
         window.Closed += (_, _) => windows.Remove(window);
+    }
+
+    /// <summary>
+    /// Floating glass windows keep their XAML root on the dark theme and theme their children instead: with a
+    /// Light root, WinUI fills the whole window, including the transparent shadow margin, with opaque white
+    /// (measured 2026-11-27: a white box around every light toolbar, menu and card).
+    /// </summary>
+    private static void ApplyTheme(FrameworkElement root, bool floating)
+    {
+        if (!floating || root is not Panel panel)
+        {
+            root.RequestedTheme = theme;
+            return;
+        }
+        root.RequestedTheme = ElementTheme.Dark;
+        foreach (var child in panel.Children)
+            if (child is FrameworkElement element) element.RequestedTheme = theme;
     }
 
     internal static void ApplyNativeAccents(ResourceDictionary resources, SolidColorBrush accent,

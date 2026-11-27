@@ -98,7 +98,7 @@ internal sealed class SettingsWindow : Window
         appearance.Children.Add(swatches);
         appearance.Children.Add(Group(
             Row("Window translucency", "Use a subtle blur and transparency on supported systems.", translucent),
-            Row("Reduce motion", "Shorten animations. Windows animation settings are always respected.", motion)));
+            Row("Reduce motion", "Replace movement with gentle fades. Windows animation settings are always respected.", motion)));
         UpdateThemeChoices();
 
         var capture = Page("Capture", "How screenshots are taken.");

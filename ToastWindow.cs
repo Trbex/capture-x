@@ -62,6 +62,7 @@ internal sealed class ToastWindow : Window
         shared.revision++;
         shared.timer.Stop();
         shared.AppWindow.Hide();
+        shared.glass.Conceal();
     }
 
     /// <summary>Shows a confirmation without taking focus from the user's current app.</summary>
@@ -85,7 +86,7 @@ internal sealed class ToastWindow : Window
         AppWindow.Show(false);
         NativeWindow.SetWindowPos(NativeWindow.Handle(this), NativeWindow.Topmost, 0, 0, 0, 0, NativeWindow.NoActivate | 0x0003);
         if (visible) glass.Settle();
-        else glass.Enter(rise: 14);
+        else glass.Enter(rise: 14, fromScale: .96f, spec: SpringSpec.Snappy, origin: new System.Numerics.Vector2(.5f, 1));
         timer.Stop();
         timer.Start();
     }
@@ -95,6 +96,8 @@ internal sealed class ToastWindow : Window
         if (expected != revision || !AppWindow.IsVisible) return;
         timer.Stop();
         await glass.ExitAsync(drop: 10);
-        if (expected == revision) AppWindow.Hide();
+        if (expected != revision) return;
+        AppWindow.Hide();
+        glass.Conceal();
     }
 }

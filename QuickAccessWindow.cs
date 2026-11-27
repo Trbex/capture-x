@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using System.Numerics;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.System;
@@ -29,6 +31,7 @@ internal sealed class QuickAccessWindow : Window
     private readonly Button previous;
     private readonly Button next;
     private CaptureEntry? entry;
+    private Task<CaptureEntry>? pending;
     private double timeoutSeconds;
     private bool pointerInside;
     private bool dragging;
@@ -217,21 +220,112 @@ internal sealed class QuickAccessWindow : Window
         double seconds, double anchorX, double anchorY, bool animate)
     {
         var current = ++revision;
-        dismissing = false;
-        glass.Panel.IsHitTestVisible = true;
-        timer.Stop();
         var source = new BitmapImage();
         if (capture.Width >= capture.Height) source.DecodePixelWidth = Math.Min(640, capture.Width);
         else source.DecodePixelHeight = Math.Min(560, capture.Height);
         using (var stream = await (await StorageFile.GetFileFromPathAsync(capture.Path)).OpenReadAsync())
             await source.SetSourceAsync(stream);
         if (current != revision) return;
+        pending = null;
+        Bind(capture, index);
+        Present(source, capture.Width, capture.Height, monitor, index, count, seconds, anchorX, anchorY, animate);
+    }
 
-        var direction = index > (entryIndex ?? index) ? 1 : -1;
-        entryIndex = index;
+    /// <summary>
+    /// Shows a capture that is still being written to disk: the preview comes straight from the captured pixels,
+    /// so the card is on screen within a frame or two of the capture instead of after PNG encoding and a reload.
+    /// Actions wait for the saved file transparently.
+    /// </summary>
+    public async Task DisplayFreshAsync(CaptureFrame frame, Task<CaptureEntry> saving, nint monitor, int count,
+        double seconds, double anchorX, double anchorY)
+    {
+        var current = ++revision;
+        var (width, height, pixels) = await Task.Run(() => Thumbnail(frame, 640, 560));
+        if (current != revision) return;
+        var bitmap = new WriteableBitmap(width, height);
+        using (var stream = bitmap.PixelBuffer.AsStream()) stream.Write(pixels);
+        bitmap.Invalidate();
+        entry = null;
+        pending = saving;
+        AutomationProperties.SetHelpText(picture, $"Screenshot, {frame.Width} × {frame.Height} px");
+        Present(bitmap, frame.Width, frame.Height, monitor, 0, count, seconds, anchorX, anchorY, animate: true);
+        previous.IsEnabled = next.IsEnabled = false;
+        try
+        {
+            var saved = await saving;
+            if (current == revision && ReferenceEquals(pending, saving)) Bind(saved, 0);
+        }
+        catch
+        {
+            // The controller reports the failed save; the card simply stays without actions.
+        }
+        finally
+        {
+            if (current == revision) previous.IsEnabled = count > 1;
+        }
+    }
+
+    private void Bind(CaptureEntry capture, int index)
+    {
         entry = capture;
-        image.ImageSource = source;
+        entryIndex = index;
         AutomationProperties.SetHelpText(picture, $"{CaptureLabel.Of(capture.Mode)}, {capture.Width} × {capture.Height} px");
+    }
+
+    /// <summary>
+    /// Box-filtered downscale of the captured pixels on a worker thread (premultiplied BGRA). Window captures keep
+    /// their alpha (rounded corners); display and region captures are forced opaque.
+    /// </summary>
+    private static (int Width, int Height, byte[] Pixels) Thumbnail(CaptureFrame frame, int maxWidth, int maxHeight)
+    {
+        var factor = Math.Max(1, (int)Math.Ceiling(Math.Max(frame.Width / (double)maxWidth, frame.Height / (double)maxHeight)));
+        var width = Math.Max(1, frame.Width / factor);
+        var height = Math.Max(1, frame.Height / factor);
+        var output = new byte[width * height * 4];
+        if (factor == 1)
+        {
+            // Small captures are shown as they are; only the (ignored) alpha channel is forced opaque.
+            var from = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(frame.Bgra.AsSpan());
+            var to = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(output.AsSpan());
+            var opaque = frame.HasAlpha ? 0u : 0xFF000000;
+            for (var i = 0; i < to.Length; i++) to[i] = from[i] | opaque;
+            return (width, height, output);
+        }
+        var source = frame.Bgra;
+        var area = factor * factor;
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                int b = 0, g = 0, r = 0, a = 0;
+                for (var dy = 0; dy < factor; dy++)
+                {
+                    var row = ((y * factor + dy) * frame.Width + x * factor) * 4;
+                    for (var dx = 0; dx < factor; dx++, row += 4)
+                    {
+                        b += source[row];
+                        g += source[row + 1];
+                        r += source[row + 2];
+                        a += source[row + 3];
+                    }
+                }
+                var o = (y * width + x) * 4;
+                output[o] = (byte)(b / area);
+                output[o + 1] = (byte)(g / area);
+                output[o + 2] = (byte)(r / area);
+                output[o + 3] = frame.HasAlpha ? (byte)(a / area) : (byte)255;
+            }
+        return (width, height, output);
+    }
+
+    private void Present(ImageSource source, int pixelWidth, int pixelHeight, nint monitor, int index, int count,
+        double seconds, double anchorX, double anchorY, bool animate)
+    {
+        dismissing = false;
+        glass.Panel.IsHitTestVisible = true;
+        timer.Stop();
+        var direction = index > (shownIndex ?? index) ? 1 : -1;
+        shownIndex = index;
+        image.ImageSource = source;
         counter.Text = count > 1 ? $"{index + 1} / {Math.Min(count, 999)}" : "";
         counterBadge.Visibility = count > 1 ? Visibility.Visible : Visibility.Collapsed;
         previous.Visibility = next.Visibility = count > 1 ? Visibility.Visible : Visibility.Collapsed;
@@ -243,27 +337,43 @@ internal sealed class QuickAccessWindow : Window
         var visible = AppWindow.IsVisible;
         if (!visible || animate)
         {
-            var ratio = capture.Height / (double)Math.Max(1, capture.Width);
+            var ratio = pixelHeight / (double)Math.Max(1, pixelWidth);
             var height = (int)Math.Clamp((CardWidth - 10) * ratio, 120, 300) + 10;
             NativeWindow.Place(this, monitor, GlassSurface.Outer(CardWidth), GlassSurface.Outer(height), anchorX, anchorY,
                 GlassSurface.Margin);
             NativeWindow.SetWindowPos(NativeWindow.Handle(this), NativeWindow.Topmost, 0, 0, 0, 0, NativeWindow.NoActivate | 0x0003);
         }
         AppWindow.Show(false);
-        if (animate && !visible)
+        if (!visible && !animate)
         {
-            glass.Enter(slide: anchorX < .5 ? -40 : 40);
+            // Returning after a cancelled capture: back in place at once (the surface was concealed when hidden).
+            glass.Enter(animate: false);
+        }
+        else if (!visible)
+        {
+            // Emerges from the screen edge it lives on (the window margin sits just past that edge, so the card
+            // is clipped there) and later leaves the same way.
+            // It is launched already moving, so it is visible on its first frame instead of creeping out from behind the edge.
+            glass.Enter(slide: EdgeTravel, fromScale: 1, spec: Arrive, origin: new Vector2(anchorX < .5 ? 0 : 1, .5f),
+                velocity: ProductMotion.Launch(new Vector2(EdgeTravel, 0), Arrive));
         }
         else if (visible)
         {
-            glass.Settle();
+            glass.Settle(Arrive);
             if (!animate) ProductMotion.Reveal(picture, slide: direction * 18);
         }
         ShowActions(pointerInside);
         RestartTimer();
     }
 
+    /// <summary>The card glides in from its screen edge: critically damped, a little slower than a popup because it travels further.</summary>
+    private static readonly SpringSpec Arrive = new(1f, .36f);
+
+    /// <summary>Horizontal distance that puts the whole card just beyond its screen edge.</summary>
+    private float EdgeTravel => (float)((CardWidth + 24) * (anchorX < .5 ? -1 : 1));
+
     private int? entryIndex;
+    private int? shownIndex;
 
     public void HideNow()
     {
@@ -272,7 +382,9 @@ internal sealed class QuickAccessWindow : Window
         timer.Stop();
         pointerInside = false;
         entryIndex = null;
+        shownIndex = null;
         AppWindow.Hide();
+        glass.Conceal();
     }
 
     public async Task DismissAsync()
@@ -282,7 +394,7 @@ internal sealed class QuickAccessWindow : Window
         dismissing = true;
         timer.Stop();
         glass.Panel.IsHitTestVisible = false;
-        await glass.ExitAsync(slide: anchorX < .5 ? -32 : 32);
+        await glass.ExitAsync(slide: EdgeTravel, toScale: 1);
         if (current == revision) HideNow();
     }
 
@@ -307,12 +419,13 @@ internal sealed class QuickAccessWindow : Window
 
     private async Task UseAsync(Func<CaptureEntry, Task> action, string? done)
     {
-        if (entry is not { } capture) return;
         var current = revision;
         busy++;
         timer.Stop();
         try
         {
+            var capture = entry ?? (pending is { } saving ? await saving : null);
+            if (capture is null || revision != current) return;
             await action(capture);
             if (done is not null && revision == current) Flash(done);
         }
@@ -329,7 +442,7 @@ internal sealed class QuickAccessWindow : Window
 
     private async void OnDragStarting(UIElement sender, DragStartingEventArgs args)
     {
-        if (entry is not { } capture)
+        if (entry is null && pending is null)
         {
             args.Cancel = true;
             return;
@@ -339,6 +452,7 @@ internal sealed class QuickAccessWindow : Window
         timer.Stop();
         try
         {
+            var capture = entry ?? await pending!;
             var file = await StorageFile.GetFileFromPathAsync(capture.Path);
             args.AllowedOperations = DataPackageOperation.Copy;
             args.Data.RequestedOperation = DataPackageOperation.Copy;
